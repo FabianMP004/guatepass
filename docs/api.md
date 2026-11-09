@@ -9,7 +9,7 @@ Fuente de requisitos: Guia-Proyecto-Final-GuatePass, RF-01–12 y RNF-01–06; r
 - Respuesta exitosa: {codigo, mensaje, request_id, data}. Error: {codigo, mensaje, request_id}; nunca stack traces ni secretos. request_id lo genera el servidor. Un replay de recarga devuelve el cuerpo original completo, incluido su request_id original; la invocación nueva conserva su identificador propio en logs.
 - Campos desconocidos de entrada: 400 VALIDATION_ERROR. Fechas de negocio YYYY-MM-DD en America/Guatemala; timestamps RFC3339 con zona, normalizados a UTC. La cámara debe enviar UTC.
 - Dinero en JSON: cadenas decimales de quetzales con dos posiciones, por ejemplo "20.00". Internamente enteros en centavos. Recarga: monto positivo, hasta 999999999.99 (límite técnico propuesto), máximo dos decimales. El helper acepta también números para migración interna; el handler debe exigir cadena en la API v1 y parsear decimales sin pérdida.
-- JWT: Authorization: Bearer <access_token>. Validar firma, emisor, expiración, token_use y client_id autorizado antes de usar sub. Roles propuestos: CONDUCTOR, OPERADOR, ATENCION, ADMINISTRADOR. Una cuenta demo tiene un rol. El backend resuelve placa/peaje desde el sub validado y datos sembrados. El rol viene del contexto autenticado validado, jamás del body/query.
+- JWT: Authorization: <id_token>. Validar firma, emisor, expiración, token_use=id y aud del app client autorizado antes de usar sub. Roles propuestos: conductor, operador, atencion, administrador. Una cuenta demo tiene un rol. El backend resuelve placa/peaje desde el sub validado y datos sembrados. El rol viene del contexto autenticado validado, jamás del body/query.
 - Cámara: x-api-key configurada fuera del código; validación efectiva en el ingreso. Elegir implementación de API Gateway/authorizer en tarea 3; no suponer que cualquier tipo de API valida este encabezado automáticamente.
 - No se aceptan carnet, rol, saldo, monto de tarifa ni peaje de operador como fuentes de autorización. El monto de recarga es una entrada validada, no una autorización para cobrar otra cuenta. La placa del path se compara con la asociación del sub.
 - Errores comunes en TODAS las rutas: 400 VALIDATION_ERROR; 401 UNAUTHORIZED (autenticación ausente/inválida); 403 FORBIDDEN (rol/propiedad); 429 RATE_LIMITED; 500 INTERNAL_ERROR; 503 TEMPORARILY_UNAVAILABLE. Los recursos ajenos retornan 403 sin revelar su contenido. No reintentar 400/403/409 automáticamente; 429/503 con espera y misma clave para la misma recarga.
@@ -57,7 +57,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 
 ## GET /users/{placa}
 
-Acceso: CONDUCTOR propio.
+Acceso: conductor propio.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -81,7 +81,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 
 ## POST /users/{placa}/topup
 
-Acceso: CONDUCTOR propio; Idempotency-Key obligatorio.
+Acceso: conductor propio; Idempotency-Key obligatorio.
 
 Petición: 
 ```json
@@ -111,7 +111,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 
 ## GET /history/payments/{placa}
 
-Acceso: CONDUCTOR propio.
+Acceso: conductor propio.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -144,7 +144,7 @@ Paginación común. devuelto se deriva de devolución confirmada. El cobro origi
 
 ## GET /history/invoices/{placa}
 
-Acceso: CONDUCTOR propio.
+Acceso: conductor propio.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -181,7 +181,7 @@ Paginación común. Conceptos PLAZO_VENCIDO y NO_REGISTRADO. No incluye un flujo
 
 ## POST /users/{placa}/tag
 
-Acceso: CONDUCTOR propio.
+Acceso: conductor propio.
 
 Petición: 
 ```json
@@ -210,7 +210,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 
 ## GET /users/{placa}/tag
 
-Acceso: CONDUCTOR propio.
+Acceso: conductor propio.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -235,7 +235,7 @@ Sin tag activo: data={"tag":null}. Sin body.
 
 ## DELETE /users/{placa}/tag
 
-Acceso: CONDUCTOR propio.
+Acceso: conductor propio.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -258,7 +258,7 @@ Repetir no produce otro evento. Si nunca existió, tag_id=null y activo=false. D
 
 ## POST /disputes
 
-Acceso: CONDUCTOR; cobro propio.
+Acceso: conductor; cobro propio.
 
 Petición: 
 ```json
@@ -289,7 +289,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 
 ## GET /disputes
 
-Acceso: CONDUCTOR: suyas; ATENCION: abiertas.
+Acceso: conductor: suyas; atencion: abiertas.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -320,7 +320,7 @@ Paginación común. Identidad y filtros impuestos por servidor; no acepta placa 
 
 ## POST /disputes/{id}/resolve
 
-Acceso: ATENCION.
+Acceso: atencion.
 
 Petición: 
 ```json
@@ -350,7 +350,7 @@ decision APROBAR o RECHAZAR, motivo obligatorio 1–1000. Rechazo devuelve estad
 
 ## GET /passes?fecha=YYYY-MM-DD
 
-Acceso: OPERADOR; peaje derivado de identidad.
+Acceso: operador; peaje derivado de identidad.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -383,7 +383,7 @@ fecha opcional: hoy en Guatemala. Paginación común. No acepta peaje_id. Antes 
 
 ## GET /tolls
 
-Acceso: ADMINISTRADOR.
+Acceso: administrador.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -414,7 +414,7 @@ Valores de ejemplo, no semillas verificadas. Paginación común. Sólo lectura: 
 
 ## GET /revenue/{fecha}
 
-Acceso: ADMINISTRADOR.
+Acceso: administrador.
 
 Petición: sin cuerpo JSON; parámetros indicados en ruta y convenciones.
 
@@ -477,3 +477,7 @@ Transiciones protegidas por condición sobre estado/versión al persistir. Los h
 ## Congelación y revisión
 
 Fabián revisa identidad, códigos y persistencia; Cynthia revisa montos, estados y carreras; Tono revisa eventos, consumidores y fecha local. Cada integrante explica un ejemplo. Registrar aceptación en el PR y etiquetar contracts-v1.0.0 después de integrar. Campos opcionales nuevos: versión menor; quitar/renombrar/cambiar significado: versión mayor y migración acordada. No se ha creado commit/tag desde este paquete.
+
+## Ajuste de autenticación — tarea 3
+
+API Gateway REST con autorizador Cognito valida el ID token del app client (aud), sin scopes OAuth en los métodos. Los grupos canónicos son conductor, operador, atencion y administrador. Los atributos custom:placa, custom:peaje_id y custom:carnet se escriben administrativamente y son sólo lectura para el app client. Cada Lambda verifica el rol y la propiedad. La tabla Usuarios se consulta por placa con lectura consistente y también se verifica sub. Esta instrucción reemplaza el uso de access token de la propuesta inicial.

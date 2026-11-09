@@ -1,0 +1,1 @@
+# Sólo biblioteca estándar y boto3 incluido en el runtime administrado de Lambda.
