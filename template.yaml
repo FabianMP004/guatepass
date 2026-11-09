@@ -1,0 +1,1155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: GuatePass task 3 - data identity hosting and event boundaries
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+    - dev
+    - demo
+    - prod
+  OwnerCarnet:
+    Type: String
+    MinLength: 1
+    AllowedPattern: '[A-Za-z0-9-]+'
+  RecargaTimeoutSeconds:
+    Type: Number
+    Default: 86400
+    MinValue: 1
+    MaxValue: 604800
+  DisputaTimeoutSeconds:
+    Type: Number
+    Default: 86400
+    MinValue: 1
+    MaxValue: 604800
+Resources:
+  UsuariosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: placa
+        AttributeType: S
+      - AttributeName: sub
+        AttributeType: S
+      KeySchema:
+      - AttributeName: placa
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+      GlobalSecondaryIndexes:
+      - IndexName: PorSub
+        KeySchema:
+        - AttributeName: sub
+          KeyType: HASH
+        - AttributeName: placa
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+  PeajesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: peaje_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: peaje_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  TagsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: tag_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: tag_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  PasosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: orden
+        AttributeType: S
+      - AttributeName: paso_id
+        AttributeType: S
+      - AttributeName: peaje_fecha
+        AttributeType: S
+      - AttributeName: placa
+        AttributeType: S
+      KeySchema:
+      - AttributeName: paso_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+      GlobalSecondaryIndexes:
+      - IndexName: PorPlaca
+        KeySchema:
+        - AttributeName: placa
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: PorPeajeFecha
+        KeySchema:
+        - AttributeName: peaje_fecha
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+  PendientesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: orden
+        AttributeType: S
+      - AttributeName: placa
+        AttributeType: S
+      KeySchema:
+      - AttributeName: placa
+        KeyType: HASH
+      - AttributeName: orden
+        KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  MovimientosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: movimiento_id
+        AttributeType: S
+      - AttributeName: orden
+        AttributeType: S
+      - AttributeName: peaje_fecha
+        AttributeType: S
+      - AttributeName: placa
+        AttributeType: S
+      KeySchema:
+      - AttributeName: movimiento_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+      GlobalSecondaryIndexes:
+      - IndexName: PorPlaca
+        KeySchema:
+        - AttributeName: placa
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: PorPeajeFecha
+        KeySchema:
+        - AttributeName: peaje_fecha
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+  FacturasTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: factura_id
+        AttributeType: S
+      - AttributeName: orden
+        AttributeType: S
+      - AttributeName: peaje_fecha
+        AttributeType: S
+      - AttributeName: placa
+        AttributeType: S
+      KeySchema:
+      - AttributeName: factura_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+      GlobalSecondaryIndexes:
+      - IndexName: PorPlaca
+        KeySchema:
+        - AttributeName: placa
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: PorPeajeFecha
+        KeySchema:
+        - AttributeName: peaje_fecha
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+  DisputasTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: cobro_id
+        AttributeType: S
+      - AttributeName: estado
+        AttributeType: S
+      - AttributeName: orden
+        AttributeType: S
+      - AttributeName: placa
+        AttributeType: S
+      KeySchema:
+      - AttributeName: cobro_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+      GlobalSecondaryIndexes:
+      - IndexName: PorPlaca
+        KeySchema:
+        - AttributeName: placa
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: PorEstado
+        KeySchema:
+        - AttributeName: estado
+          KeyType: HASH
+        - AttributeName: orden
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+  NotificacionesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: notificacion_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: notificacion_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  RecaudacionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: recaudacion_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: recaudacion_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  OutboxTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: creado_en
+        AttributeType: S
+      - AttributeName: evento_id
+        AttributeType: S
+      - AttributeName: pendiente_shard
+        AttributeType: S
+      KeySchema:
+      - AttributeName: evento_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+      GlobalSecondaryIndexes:
+      - IndexName: PorPendiente
+        KeySchema:
+        - AttributeName: pendiente_shard
+          KeyType: HASH
+        - AttributeName: creado_en
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+  EsperasTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: espera_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: espera_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  IdempotenciaTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: idempotency_id
+        AttributeType: S
+      KeySchema:
+      - AttributeName: idempotency_id
+        KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+      - Key: Project
+        Value: GuatePass
+      - Key: Environment
+        Value:
+          Ref: Environment
+  RecargaTimeoutParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /guatepass/${Environment}/recarga/timeout-seconds
+      Type: String
+      Value:
+        Ref: RecargaTimeoutSeconds
+      Description: Seconds used only when creating a new deadline.
+  DisputaTimeoutParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /guatepass/${Environment}/disputa/timeout-seconds
+      Type: String
+      Value:
+        Ref: DisputaTimeoutSeconds
+      Description: Seconds used only when creating a new deadline.
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Sub: ${AWS::StackName}-users
+      UserPoolTier: LITE
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UsernameConfiguration:
+        CaseSensitive: false
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+      Schema:
+      - Name: placa
+        AttributeDataType: String
+        Mutable: true
+        Required: false
+        StringAttributeConstraints:
+          MinLength: '1'
+          MaxLength: '128'
+      - Name: peaje_id
+        AttributeDataType: String
+        Mutable: true
+        Required: false
+        StringAttributeConstraints:
+          MinLength: '1'
+          MaxLength: '128'
+      - Name: carnet
+        AttributeDataType: String
+        Mutable: true
+        Required: false
+        StringAttributeConstraints:
+          MinLength: '1'
+          MaxLength: '128'
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      ExplicitAuthFlows:
+      - ALLOW_USER_SRP_AUTH
+      - ALLOW_USER_PASSWORD_AUTH
+      - ALLOW_REFRESH_TOKEN_AUTH
+      ReadAttributes:
+      - email
+      - name
+      - custom:placa
+      - custom:peaje_id
+      - custom:carnet
+      WriteAttributes:
+      - email
+      - name
+      IdTokenValidity: 60
+      AccessTokenValidity: 60
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        IdToken: minutes
+        AccessToken: minutes
+        RefreshToken: days
+  ConductorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: conductor
+      UserPoolId:
+        Ref: UserPool
+  OperadorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: operador
+      UserPoolId:
+        Ref: UserPool
+  AtencionGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: atencion
+      UserPoolId:
+        Ref: UserPool
+  AdministradorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: administrador
+      UserPoolId:
+        Ref: UserPool
+  PortalesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+        - ObjectOwnership: BucketOwnerEnforced
+  PortalOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  PortalCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name:
+          Fn::Sub: ${AWS::StackName}-cache
+        DefaultTTL: 60
+        MinTTL: 0
+        MaxTTL: 300
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+  PortalDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        PriceClass: PriceClass_100
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+        Origins:
+        - Id: Portales
+          DomainName:
+            Fn::GetAtt:
+            - PortalesBucket
+            - RegionalDomainName
+          OriginAccessControlId:
+            Ref: PortalOAC
+          S3OriginConfig:
+            OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: Portales
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+          CachedMethods:
+          - GET
+          - HEAD
+          Compress: true
+          CachePolicyId:
+            Ref: PortalCachePolicy
+  PortalesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: PortalesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: cloudfront.amazonaws.com
+          Action: s3:GetObject
+          Resource:
+            Fn::Sub: ${PortalesBucket.Arn}/*
+          Condition:
+            StringEquals:
+              AWS:SourceArn:
+                Fn::Sub: arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${PortalDistribution}
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName:
+        Ref: Environment
+      EndpointConfiguration: REGIONAL
+      OpenApiVersion: 3.0.1
+      Cors:
+        AllowOrigin:
+          Fn::Sub: '''https://${PortalDistribution.DomainName}'''
+        AllowHeaders: '''Content-Type,Authorization,Idempotency-Key'''
+        AllowMethods: '''GET,POST,DELETE,OPTIONS'''
+        MaxAge: '''600'''
+      Auth:
+        DefaultAuthorizer: Cognito
+        AddDefaultAuthorizerToCorsPreflight: false
+        AddApiKeyRequiredToCorsPreflight: false
+        ApiKeyRequired: false
+        Authorizers:
+          Cognito:
+            UserPoolArn:
+              Fn::GetAtt:
+              - UserPool
+              - Arn
+            Identity:
+              Header: Authorization
+              ValidationExpression:
+                Fn::Sub: ^${UserPoolClient}$
+      GatewayResponses:
+        UNAUTHORIZED:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin:
+                Fn::Sub: '''https://${PortalDistribution.DomainName}'''
+              Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
+              Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
+          ResponseTemplates:
+            application/json: '{"codigo":"UNAUTHORIZED","mensaje":"Solicitud rechazada
+              por el gateway.","request_id":"$context.requestId"}'
+          StatusCode: '401'
+        ACCESS_DENIED:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin:
+                Fn::Sub: '''https://${PortalDistribution.DomainName}'''
+              Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
+              Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
+          ResponseTemplates:
+            application/json: '{"codigo":"ACCESS_DENIED","mensaje":"Solicitud rechazada
+              por el gateway.","request_id":"$context.requestId"}'
+          StatusCode: '403'
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin:
+                Fn::Sub: '''https://${PortalDistribution.DomainName}'''
+              Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
+              Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
+          ResponseTemplates:
+            application/json: '{"codigo":"DEFAULT_4XX","mensaje":"Solicitud rechazada
+              por el gateway.","request_id":"$context.requestId"}'
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin:
+                Fn::Sub: '''https://${PortalDistribution.DomainName}'''
+              Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
+              Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
+          ResponseTemplates:
+            application/json: '{"codigo":"DEFAULT_5XX","mensaje":"Solicitud rechazada
+              por el gateway.","request_id":"$context.requestId"}'
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-events
+  OutboxDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  UsersLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-users
+      RetentionInDays: 14
+  UsersRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: UsersPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-users:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+  UsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-users
+      CodeUri: src/
+      Handler: handlers.users.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - UsersRole
+        - Arn
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+          CLIENT_ID:
+            Ref: UserPoolClient
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+      Events:
+        GetUser:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /users/{placa}
+            Method: get
+    DependsOn: UsersLogs
+  PassesLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-passes
+      RetentionInDays: 14
+  PassesRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: PassesPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-passes:*
+          - Effect: Allow
+            Action: dynamodb:Query
+            Resource:
+              Fn::Sub: ${PasosTable.Arn}/index/PorPeajeFecha
+  PassesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-passes
+      CodeUri: src/
+      Handler: handlers.passes.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - PassesRole
+        - Arn
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+          CLIENT_ID:
+            Ref: UserPoolClient
+          PASOS_TABLE:
+            Ref: PasosTable
+      Events:
+        GetPasses:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /passes
+            Method: get
+    DependsOn: PassesLogs
+  WebhookLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-webhook
+      RetentionInDays: 14
+  WebhookRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: WebhookPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-webhook:*
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-webhook
+      CodeUri: src/
+      Handler: handlers.webhook.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - WebhookRole
+        - Arn
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+          CLIENT_ID:
+            Ref: UserPoolClient
+      Events:
+        PostToll:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /webhook/toll
+            Method: post
+            Auth:
+              Authorizer: NONE
+              ApiKeyRequired: true
+    DependsOn: WebhookLogs
+  OutboxPublisherLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-outboxpublisher
+      RetentionInDays: 14
+  OutboxPublisherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: OutboxPublisherPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-outboxpublisher:*
+          - Effect: Allow
+            Action:
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            Resource:
+              Fn::GetAtt:
+              - OutboxTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:Query
+            Resource:
+              Fn::Sub: ${OutboxTable.Arn}/index/PorPendiente
+          - Effect: Allow
+            Action:
+            - dynamodb:DescribeStream
+            - dynamodb:GetRecords
+            - dynamodb:GetShardIterator
+            Resource:
+              Fn::GetAtt:
+              - OutboxTable
+              - StreamArn
+          - Effect: Allow
+            Action: dynamodb:ListStreams
+            Resource: '*'
+          - Effect: Allow
+            Action: events:PutEvents
+            Resource:
+              Fn::GetAtt:
+              - EventBus
+              - Arn
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource:
+              Fn::GetAtt:
+              - OutboxDLQ
+              - Arn
+  OutboxPublisherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-outboxpublisher
+      CodeUri: src/
+      Handler: handlers.outbox.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - OutboxPublisherRole
+        - Arn
+      Environment:
+        Variables:
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+          CLIENT_ID:
+            Ref: UserPoolClient
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          EVENT_BUS_NAME:
+            Ref: EventBus
+      Events:
+        InsertedEvents:
+          Type: DynamoDB
+          Properties:
+            Stream:
+              Fn::GetAtt:
+              - OutboxTable
+              - StreamArn
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 10
+            MaximumRetryAttempts: 3
+            MaximumRecordAgeInSeconds: 3600
+            BisectBatchOnFunctionError: true
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
+            FilterCriteria:
+              Filters:
+              - Pattern: '{"eventName": ["INSERT"]}'
+            DestinationConfig:
+              OnFailure:
+                Type: SQS
+                Destination:
+                  Fn::GetAtt:
+                  - OutboxDLQ
+                  - Arn
+        Recovery:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: true
+    DependsOn: OutboxPublisherLogs
+  RealtimeApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-realtime
+      EventConfig:
+        AuthProviders:
+        - AuthType: AMAZON_COGNITO_USER_POOLS
+          CognitoConfig:
+            UserPoolId:
+              Ref: UserPool
+            AwsRegion:
+              Ref: AWS::Region
+            AppIdClientRegex:
+              Fn::Sub: ^${UserPoolClient}$
+        - AuthType: AWS_IAM
+        ConnectionAuthModes:
+        - AuthType: AMAZON_COGNITO_USER_POOLS
+        DefaultSubscribeAuthModes:
+        - AuthType: AMAZON_COGNITO_USER_POOLS
+        DefaultPublishAuthModes:
+        - AuthType: AWS_IAM
+  PeajesNamespace:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - RealtimeApi
+        - ApiId
+      Name: peajes
+      CodeHandlers: "import { util } from '@aws-appsync/utils';\nexport function onSubscribe(ctx)\
+        \ {\n  const c = ctx.identity.claims;\n  const groups = c['cognito:groups']\
+        \ || [];\n  const toll = c['custom:peaje_id'];\n  if (!groups.includes('operador')\
+        \ || !toll || c.token_use !== 'id') {\n    util.unauthorized();\n  }\n  //\
+        \ Exact channel: blocks wildcard and any other toll.\n  if (ctx.info.channel.path\
+        \ !== '/peajes/' + toll) {\n    util.unauthorized();\n  }\n}\nexport function\
+        \ onPublish(ctx) { return ctx.events; }\n"
+  WebhookApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Enabled: true
+  WebhookUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+      - ApiId:
+          Ref: Api
+        Stage:
+          Ref: Api.Stage
+      Throttle:
+        BurstLimit: 100
+        RateLimit: 100
+  WebhookUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId:
+        Ref: WebhookApiKey
+      KeyType: API_KEY
+      UsagePlanId:
+        Ref: WebhookUsagePlan
+Outputs:
+  UsuariosTableName:
+    Value:
+      Ref: UsuariosTable
+  PeajesTableName:
+    Value:
+      Ref: PeajesTable
+  TagsTableName:
+    Value:
+      Ref: TagsTable
+  PasosTableName:
+    Value:
+      Ref: PasosTable
+  PendientesTableName:
+    Value:
+      Ref: PendientesTable
+  MovimientosTableName:
+    Value:
+      Ref: MovimientosTable
+  FacturasTableName:
+    Value:
+      Ref: FacturasTable
+  DisputasTableName:
+    Value:
+      Ref: DisputasTable
+  NotificacionesTableName:
+    Value:
+      Ref: NotificacionesTable
+  RecaudacionTableName:
+    Value:
+      Ref: RecaudacionTable
+  OutboxTableName:
+    Value:
+      Ref: OutboxTable
+  EsperasTableName:
+    Value:
+      Ref: EsperasTable
+  IdempotenciaTableName:
+    Value:
+      Ref: IdempotenciaTable
+  RecargaTimeoutParameterName:
+    Value:
+      Ref: RecargaTimeoutParameter
+  DisputaTimeoutParameterName:
+    Value:
+      Ref: DisputaTimeoutParameter
+  ApiUrl:
+    Value:
+      Fn::Sub: https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${Environment}
+  UserPoolId:
+    Value:
+      Ref: UserPool
+  UserPoolClientId:
+    Value:
+      Ref: UserPoolClient
+  PortalBucketName:
+    Value:
+      Ref: PortalesBucket
+  PortalDistributionId:
+    Value:
+      Ref: PortalDistribution
+  PortalUrl:
+    Value:
+      Fn::Sub: https://${PortalDistribution.DomainName}
+  EventBusName:
+    Value:
+      Ref: EventBus
+  EventBusArn:
+    Value:
+      Fn::GetAtt:
+      - EventBus
+      - Arn
+  OutboxStreamArn:
+    Value:
+      Fn::GetAtt:
+      - OutboxTable
+      - StreamArn
+  OutboxDLQUrl:
+    Value:
+      Ref: OutboxDLQ
+  WebhookApiKeyId:
+    Value:
+      Ref: WebhookApiKey
+  RealtimeApiId:
+    Value:
+      Fn::GetAtt:
+      - RealtimeApi
+      - ApiId
+  RealtimeHttpDomain:
+    Value:
+      Fn::GetAtt:
+      - RealtimeApi
+      - Dns.Http
+  RealtimeDomain:
+    Value:
+      Fn::GetAtt:
+      - RealtimeApi
+      - Dns.Realtime
+  OwnerCarnetValue:
+    Value:
+      Ref: OwnerCarnet

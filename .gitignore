@@ -230,3 +230,27 @@ secrets/
 credentials/
 demo-passwords*
 *.pem
+
+# Configuración generada por ambiente
+portales/config.json
+
+.venv312/
+
+# Entornos y archivos generados
+.venv/
+.venv312/
+.aws-sam/
+__pycache__/
+.pytest_cache/
+portales/config.json
+*.zip
+
+# Credenciales y secretos
+.env
+.env.*
+!.env.example
+.aws/
+secrets/
+credentials/
+demo-passwords*
+*.pem
