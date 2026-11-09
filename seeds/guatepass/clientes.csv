@@ -1,0 +1,8 @@
+placa,nombre,nit,email,telefono,tiene_tag,tag_id,saldo_disponible
+P-123ABC,Juan Pérez,1234567-1,juan.perez@example.com,50212345678,false,,100.00
+P-456DEF,María López,2345678-2,maria.lopez@example.com,50298765432,true,TAG-001,250.00
+P-111JKL,Ana Torres,4567890-4,ana.torres@example.com,50245678901,false,,75.00
+P-333PQR,Sofía Morales,6789012-6,sofia.morales@example.com,50256781234,true,TAG-002,150.00
+P-444STU,Diego Ramírez,7890123-7,diego.ramirez@example.com,50231234567,false,,5.00
+P-666YZA,Andrés Castillo,9012345-9,andres.castillo@example.com,50277778888,true,TAG-003,0.00
+P-777BCD,Paola Herrera,1123456-K,paola.herrera@example.com,50244445555,true,TAG-004,500.00
