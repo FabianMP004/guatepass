@@ -1,0 +1,5 @@
+peaje_id,nombre,ubicacion,tarifa_base
+PEAJE_ZONA10,Peaje Zona 10,Bulevar Los Próceres,5.00
+PEAJE_CES,Peaje Carretera a El Salvador,Km 15 Carretera a El Salvador,8.00
+PEAJE_ROOSEVELT,Peaje Calzada Roosevelt,Calzada Roosevelt y Periférico,6.00
+PEAJE_ATLANTICO,Peaje Ruta al Atlántico,Km 9 Ruta al Atlántico,7.00
