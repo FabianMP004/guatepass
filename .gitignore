@@ -218,3 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# GuatePass: archivos locales y secretos
+.env
+.env.*
+!.env.example
+.venv/
+.aws/
+.aws-sam/
+secrets/
+credentials/
+demo-passwords*
+*.pem
