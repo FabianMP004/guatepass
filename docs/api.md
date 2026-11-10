@@ -6,7 +6,7 @@ Fuente de requisitos: Guia-Proyecto-Final-GuatePass, RF-01–12 y RNF-01–06; r
 ## Convenciones comunes
 
 - HTTPS; Content-Type: application/json; UTF-8; rutas relativas a la URL del despliegue. La versión de contrato se lleva en Git, no se agrega /v1 sin acuerdo.
-- Respuesta exitosa: {codigo, mensaje, request_id, data}. Error: {codigo, mensaje, request_id}; nunca stack traces ni secretos. request_id lo genera el servidor. Un replay de recarga devuelve el cuerpo original completo, incluido su request_id original; la invocación nueva conserva su identificador propio en logs.
+- Respuesta exitosa: {codigo, mensaje, request_id, data}. Error: {codigo, mensaje, request_id}; nunca stack traces ni secretos. request_id lo genera el servidor. Un replay de recarga devuelve los mismos datos de recarga; request_id identifica cada solicitud recibida.
 - Campos desconocidos de entrada: 400 VALIDATION_ERROR. Fechas de negocio YYYY-MM-DD en America/Guatemala; timestamps RFC3339 con zona, normalizados a UTC. La cámara debe enviar UTC.
 - Dinero en JSON: cadenas decimales de quetzales con dos posiciones, por ejemplo "20.00". Internamente enteros en centavos. Recarga: monto positivo, hasta 999999999.99 (límite técnico propuesto), máximo dos decimales. El helper acepta también números para migración interna; el handler debe exigir cadena en la API v1 y parsear decimales sin pérdida.
 - JWT: Authorization: <id_token>. Validar firma, emisor, expiración, token_use=id y aud del app client autorizado antes de usar sub. Roles propuestos: conductor, operador, atencion, administrador. Una cuenta demo tiene un rol. El backend resuelve placa/peaje desde el sub validado y datos sembrados. El rol viene del contexto autenticado validado, jamás del body/query.
@@ -81,7 +81,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 
 ## POST /users/{placa}/topup
 
-Acceso: conductor propio; Idempotency-Key obligatorio.
+Acceso: conductor propio; Idempotency-Key obligatorio. Solo se acepta monto como texto decimal positivo, máximo dos decimales y Q10,000.00 por recarga.
 
 Petición: 
 ```json
@@ -447,7 +447,7 @@ Errores: todos los comunes y los específicos siguientes. Cada error conserva ex
 ## Idempotencia de recarga
 
 Idempotency-Key: UUID generado por el navegador una sola vez al iniciar la acción. Conservar hasta conocer el resultado definitivo, incluso tras timeout o recarga de página; acción nueva = clave nueva. No guardar tokens de autenticación junto con la clave.
-Clave de almacenamiento: (sub autenticado, "POST /users/{placa}/topup", placa autorizada, Idempotency-Key). Comparar monto normalizado en centavos: "20.0" y "20.00" equivalen si la entrada se normaliza. Guardar status HTTP y cuerpo completo. Misma clave y monto: devolver resultado guardado sin abonar ni emitir otro evento. Distinto monto: 409 IDEMPOTENCY_CONFLICT. Reservar clave y abonar mediante operación atómica/transacción; concurrencia no se resuelve con un diccionario Python. Un registro en curso no se toma como recarga terminada. Conservar registros durante todo el proyecto; TTL sólo después de definir ventana de reintentos.
+Clave de almacenamiento: (sub autenticado, "POST /users/{placa}/topup", placa autorizada, Idempotency-Key). Comparar monto normalizado en centavos: "20.0" y "20.00" equivalen si la entrada se normaliza. Guardar el resultado de recarga en la misma transacción que el crédito y devolverlo con HTTP 200. Misma clave y monto: devolver resultado guardado sin abonar ni emitir otro evento. Distinto monto: 409 IDEMPOTENCY_CONFLICT. Reservar clave y abonar mediante operación atómica/transacción; concurrencia no se resuelve con un diccionario Python. Un registro en curso no se toma como recarga terminada. Conservar registros durante todo el proyecto; TTL sólo después de definir ventana de reintentos.
 
 ## Identificadores
 

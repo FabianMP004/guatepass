@@ -12,9 +12,82 @@ from common import dynamo as d
 from common.deadlines import deadline
 from common.events import outbox_item
 from common.models import make_event, stable_id
+import hashlib
+import json
 
 MAX_ATTEMPTS = 8
 TERMINAL = {'COBRADO', 'NO_REGISTRADO', 'FACTURADO', 'NO_IDENTIFICADO'}
+MAX_TOPUP_CENTAVOS = 1_000_000  # Q10,000.00 per operation
+
+
+def format_centavos(value):
+    return f'{value // 100}.{value % 100:02d}'
+
+
+def topup_id(placa, clave):
+    return stable_id('idempotencia', placa, 'RECARGA', clave)
+
+
+def apply_topup(placa: str, monto_centavos: int, clave: str, actor: dict) -> dict:
+    if type(monto_centavos) is not int or not 1 <= monto_centavos <= MAX_TOPUP_CENTAVOS:
+        raise ValueError('INVALID_AMOUNT')
+    if not isinstance(placa, str) or not placa or not isinstance(clave, str) or not 1 <= len(clave) <= 128 or not clave.isascii() or any(c.isspace() for c in clave):
+        raise ValueError('INVALID_IDEMPOTENCY_KEY')
+    if not isinstance(actor, dict) or actor.get('custom:placa') != placa or not actor.get('sub'):
+        raise ValueError('INVALID_ACTOR')
+    identifier = topup_id(placa, clave)
+    recarga_id = stable_id('recarga', placa, clave)
+    digest = hashlib.sha256(json.dumps({'monto_centavos': monto_centavos},
+        separators=(',', ':'), sort_keys=True).encode()).hexdigest()
+    db = d.client()
+    for attempt in range(MAX_ATTEMPTS):
+        user = d.get(db, 'USUARIOS', {'placa': placa})
+        if not user or user.get('sub') != actor['sub']:
+            raise ValueError('INVALID_ACTOR')
+        carnet = identity(user)
+        if actor.get('custom:carnet') and actor['custom:carnet'] != carnet:
+            raise ValueError('INVALID_ACTOR')
+        stored = d.get(db, 'IDEMPOTENCIA', {'idempotency_id': identifier})
+        if stored:
+            if stored['cuerpo_hash'] != digest:
+                raise ValueError('IDEMPOTENCY_CONFLICT')
+            return stored['respuesta']
+        before = user.get('saldo_centavos')
+        if type(before) is not int or before < 0 or before > 99_999_999_999 - monto_centavos:
+            raise ValueError('INVALID_WALLET')
+        when = now()
+        result = {'recarga_id': recarga_id, 'monto': format_centavos(monto_centavos),
+            'saldo_despues_recarga': format_centavos(before + monto_centavos), 'moneda': 'GTQ'}
+        recarga = {'idempotency_id': identifier, 'placa': placa, 'operacion': 'RECARGA',
+            'cuerpo_hash': digest, 'monto_centavos': monto_centavos, 'respuesta': result,
+            'creado_en': timestamp(when)}
+        local_date = when.astimezone(ZoneInfo('America/Guatemala')).date().isoformat()
+        movement = {'movimiento_id': recarga_id, 'tipo': 'RECARGA', 'placa': placa,
+            'monto_centavos': monto_centavos, 'saldo_anterior_centavos': before,
+            'saldo_centavos': before + monto_centavos, 'fecha': timestamp(when),
+            'fecha_local': local_date, 'orden': timestamp(when) + '#' + recarga_id}
+        event = make_event('saldo.recargado', recarga_id, 1,
+            {'recarga_id': recarga_id, 'placa': placa, 'monto_centavos': monto_centavos,
+             'saldo_centavos': before + monto_centavos},
+            actor.get('request_id') or 'recarga:' + recarga_id, timestamp(when), carnet)
+        update = {'Update': {'TableName': d.table('USUARIOS'),
+            'Key': d.encode({'placa': placa}),
+            'ConditionExpression': '#v = :v AND #s = :s AND #c = :c AND #b = :b',
+            'UpdateExpression': 'SET #v = :next, #b = #b + :m',
+            'ExpressionAttributeNames': {'#v': 'version', '#s': 'sub', '#c': 'carnet', '#b': 'saldo_centavos'},
+            'ExpressionAttributeValues': d.encode({':v': user['version'], ':next': user['version']+1,
+                ':s': user['sub'], ':c': carnet, ':b': before, ':m': monto_centavos})}}
+        try:
+            transact(db, [update, d.put('MOVIMIENTOS', movement),
+                d.put('IDEMPOTENCIA', recarga), d.put('OUTBOX', outbox_item(event))])
+            return result
+        except Exception as exc:
+            if not d.retryable(exc) or attempt == MAX_ATTEMPTS - 1:
+                # An ambiguous commit can have succeeded; the next request with
+                # the same key reads the durable response before attempting credit.
+                raise
+            d.backoff(attempt)
+    raise RuntimeError('TOPUP_RETRY_EXHAUSTED')
 
 
 def calcular_tarifa(base_centavos: int, modalidad: str) -> int:
@@ -91,6 +164,69 @@ def pending_key(paso):
     return {'placa': paso['placa'], 'orden': paso['recibido_en'] + '#' + paso['paso_id']}
 
 
+def first_pending(db, placa):
+    page = db.query(TableName=d.table('PENDIENTES'), ConsistentRead=True,
+        KeyConditionExpression='#p = :p', ExpressionAttributeNames={'#p': 'placa'},
+        ExpressionAttributeValues=d.encode({':p': placa}), ScanIndexForward=True, Limit=1)
+    return d.decode(page['Items'][0]) if page.get('Items') else None
+
+
+def settle_pending(db, head):
+    """Settle the current head only. Caller must requery after any conflict."""
+    placa = head['placa']
+    paso = d.get(db, 'PASOS', {'paso_id': head['paso_id']})
+    if paso is None:
+        raise ValueError('PENDING_PASS_MISSING')
+    if paso['estado'] != 'PENDIENTE':
+        return 'RELEER'
+    if paso['placa'] != placa or pending_key(paso) != {'placa': placa, 'orden': head['orden']}:
+        raise ValueError('PENDING_PASS_MISMATCH')
+    amount = paso['monto_centavos']
+    if type(amount) is not int or amount <= 0 or amount != head['monto_centavos']:
+        raise ValueError('PENDING_AMOUNT_MISMATCH')
+    current = now()
+    due = datetime.fromisoformat(paso['vence_en'].replace('Z', '+00:00'))
+    if due.tzinfo is None or paso['vence_en'] != head['vence_en']:
+        raise ValueError('PENDING_DEADLINE_MISMATCH')
+    if current >= due:
+        return 'VENCIDO'
+    user = d.get(db, 'USUARIOS', {'placa': placa})
+    identity(user)
+    if user['sub'] != paso['propietario_sub']:
+        raise ValueError('PASS_OWNER_CHANGED')
+    balance = user.get('saldo_centavos')
+    if type(balance) is not int or balance < 0:
+        raise ValueError('INVALID_WALLET')
+    if balance < amount:
+        return 'SIN_SALDO'
+    new = dict(paso, estado='COBRADO', version=paso['version'] + 1,
+               cobro_id=stable_id('cobro', paso['paso_id']), cobrado_en=timestamp(current))
+    date_local = current.astimezone(ZoneInfo('America/Guatemala')).date().isoformat()
+    movement = {'movimiento_id': new['cobro_id'], 'cobro_id': new['cobro_id'],
+        'tipo': 'COBRO', 'placa': placa, 'paso_id': paso['paso_id'],
+        'peaje_id': paso['peaje_id'], 'monto_centavos': amount,
+        'saldo_anterior_centavos': balance, 'saldo_centavos': balance - amount,
+        'modalidad': paso['modalidad'], 'fecha': timestamp(current), 'fecha_local': date_local,
+        'peaje_fecha': paso['peaje_id'] + '#' + date_local,
+        'orden': timestamp(current) + '#' + new['cobro_id']}
+    update = {'Update': {'TableName': d.table('USUARIOS'),
+        'Key': d.encode({'placa': placa}),
+        'ConditionExpression': '#v = :v AND #s = :s AND #b = :b AND #b >= :m',
+        'UpdateExpression': 'SET #v = :next, #b = #b - :m',
+        'ExpressionAttributeNames': {'#v': 'version', '#s': 'sub', '#b': 'saldo_centavos'},
+        'ExpressionAttributeValues': d.encode({':v': user['version'], ':next': user['version'] + 1,
+            ':s': user['sub'], ':b': balance, ':m': amount})}}
+    payload = dict(payload_for(new), cobro_id=new['cobro_id'], cobrado_en=new['cobrado_en'],
+                   saldo_centavos=balance - amount)
+    transact(db, [update,
+        d.put('PASOS', new, paso, ['estado', 'version', 'monto_centavos', 'vence_en']),
+        {'Delete': {'TableName': d.table('PENDIENTES'), 'Key': d.encode({'placa': placa, 'orden': head['orden']}),
+            **d.guard(head, ['paso_id', 'monto_centavos', 'vence_en'])}},
+        d.put('MOVIMIENTOS', movement),
+        d.put('OUTBOX', event_for(new, 'paso.cobrado', payload, current))])
+    return 'COBRADO'
+
+
 def transition(db, paso):
     when = now()
     if paso['modalidad'] == 'NO_REGISTRADO':
@@ -106,6 +242,7 @@ def transition(db, paso):
     amount, balance = paso['monto_centavos'], user.get('saldo_centavos')
     if type(balance) is not int or balance < 0 or amount <= 0:
         raise ValueError('INVALID_WALLET')
+    older = first_pending(db, paso['placa'])
 
     final = dict(paso, version=paso['version'] + 1)
     values = {':version': user['version'], ':next': user['version'] + 1,
@@ -115,7 +252,7 @@ def transition(db, paso):
         'ConditionExpression': '#v = :version AND #s = :sub',
         'UpdateExpression': 'SET #v = :next'}
     items = []
-    if balance >= amount:
+    if balance >= amount and older is None:
         result = 'COBRADO'
         identifier = stable_id('cobro', paso['paso_id'])
         final.update(estado=result, cobro_id=identifier, cobrado_en=timestamp(when))
@@ -140,7 +277,12 @@ def transition(db, paso):
         result = 'PENDIENTE'
         due = deadline(boto3.client('ssm'), os.environ['RECARGA_TIMEOUT_PARAMETER'], when)
         final.update(estado=result, vence_en=due)
-        update['ConditionExpression'] += ' AND #b < :amount'
+        if older is None:
+            update['ConditionExpression'] += ' AND #b < :amount'
+        else:
+            items.append(d.check('PENDIENTES',
+                {'placa': older['placa'], 'orden': older['orden']}, older,
+                ['paso_id', 'monto_centavos', 'vence_en']))
         pending = dict(pending_key(paso), paso_id=paso['paso_id'],
             recibido_en=paso['recibido_en'], monto_centavos=amount,
             modalidad=paso['modalidad'], vence_en=due, propietario_sub=user['sub'])

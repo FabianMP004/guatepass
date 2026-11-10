@@ -14,11 +14,11 @@ No usar el id asignado por EventBridge para deduplicar.
 
 ## Catálogo y conexiones
 
-| source | detail-type | Destinos de negocio | Conexiones creadas en tarea 6 |
+| source | detail-type | Destinos de negocio | Conexiones activas tras tarea 8 |
 |---|---|---|---|
 | guatepass.pasos | paso.registrado | cobro y tiempo real | cola-pasos |
 | guatepass.pasos | paso.cobrado | notificación, tiempo real, cierre de espera | cola-notificaciones |
-| guatepass.pasos | paso.pendiente | inicio de espera, notificación, tiempo real | cola-notificaciones |
+| guatepass.pasos | paso.pendiente | inicio de espera, notificación, tiempo real, reintento de drenaje | cola-pasos, cola-notificaciones |
 | guatepass.pasos | paso.no_registrado | registro y tiempo real | cola-registro |
 | guatepass.pasos | paso.no_identificado | tiempo real | pendiente del consumidor de tiempo real |
 | guatepass.pasos | paso.facturado | notificación y tiempo real | cola-notificaciones |
@@ -31,12 +31,12 @@ No usar el id asignado por EventBridge para deduplicar.
 
 Las conexiones de tiempo real y esperas no están implementadas por este paquete.
 Añadir sus reglas/targets y DLQ cuando existan sus consumidores (tareas 8–10 y 12).
-Tarea 7 añade CobrarFunction a cola-pasos, desactivada por defecto hasta revisar
-identidades y mensajes acumulados. Procesa paso.registrado y PasoRegistrado.
-El cobro ordenado de pendientes para saldo.recargado/saldo.devuelto se conectará
-en la tarea de recargas: esos mensajes aún fallan explícitamente y van a
-reintentos/DLQ, nunca se confirman sin procesar. No producirlos hasta implementar
-ese flujo. Cola-registro sigue sin consumidor hasta la tarea del externo.
+Tarea 8 conecta CobrarFunction a paso.registrado, paso.pendiente, saldo.recargado y
+saldo.devuelto. El drenaje lee la primera deuda de Pendientes con consistencia fuerte;
+una continuación técnica en SQS usa una marca recuperable en Esperas y una regla
+programada la vuelve a enviar si falla el envío inicial. No es un evento de negocio
+ni entra al Archive. Las deudas vencidas permanecen hasta su facturación futura.
+Cola-registro sigue sin consumidor hasta la tarea del externo.
 
 ## Snapshot requerido por transición
 
