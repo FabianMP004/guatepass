@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: GuatePass task 3 - data identity hosting and event boundaries
+Description: GuatePass task 5 - durable ingestion and recoverable events
 Parameters:
   Environment:
     Type: String
@@ -731,7 +731,7 @@ Resources:
       Handler: handlers.users.handler
       Runtime: python3.12
       Timeout: 30
-      MemorySize: 256
+      MemorySize: 1024
       Role:
         Fn::GetAtt:
         - UsersRole
@@ -842,22 +842,43 @@ Resources:
             - logs:PutLogEvents
             Resource:
               Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-webhook:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              Fn::GetAtt: [PasosTable, Arn]
+          - Effect: Allow
+            Action: dynamodb:ConditionCheckItem
+            Resource:
+              Fn::GetAtt: [PeajesTable, Arn]
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt: [PasosTable, Arn]
+            - Fn::GetAtt: [OutboxTable, Arn]
   WebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-webhook
       CodeUri: src/
-      Handler: handlers.webhook.handler
+      Handler: pasos.webhook.handler
       Runtime: python3.12
       Timeout: 30
-      MemorySize: 256
+      MemorySize: 1024
       Role:
         Fn::GetAtt:
         - WebhookRole
         - Arn
       Environment:
         Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+          PEAJES_TABLE:
+            Ref: PeajesTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          OWNER_CARNET:
+            Ref: OwnerCarnet
           ALLOWED_ORIGIN:
             Fn::Sub: https://${PortalDistribution.DomainName}
           CLIENT_ID:
@@ -926,7 +947,9 @@ Resources:
             Action: dynamodb:ListStreams
             Resource: '*'
           - Effect: Allow
-            Action: events:PutEvents
+            Action:
+            - events:PutEvents
+            - events:DescribeEventBus
             Resource:
               Fn::GetAtt:
               - EventBus
@@ -943,7 +966,7 @@ Resources:
       FunctionName:
         Fn::Sub: ${AWS::StackName}-outboxpublisher
       CodeUri: src/
-      Handler: handlers.outbox.handler
+      Handler: eventos.publicar.handler
       Runtime: python3.12
       Timeout: 60
       MemorySize: 256

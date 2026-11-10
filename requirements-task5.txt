@@ -1,0 +1,3 @@
+-r requirements-contracts.txt
+-r requirements-task3.txt
+moto[dynamodb,events]==5.1.16
