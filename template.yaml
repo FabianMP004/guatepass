@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: GuatePass task 7 - atomic wallet and tag lifecycle
+Description: GuatePass task 8 - topups and ordered pending settlement
 Parameters:
   Environment:
     Type: String
@@ -652,8 +652,7 @@ Resources:
               Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
               Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
           ResponseTemplates:
-            application/json: '{"codigo":"UNAUTHORIZED","mensaje":"Solicitud rechazada
-              por el gateway.","request_id":"$context.requestId"}'
+            application/json: '{"codigo":"UNAUTHORIZED","mensaje":"Solicitud rechazada por el gateway.","request_id":"$context.requestId"}'
           StatusCode: '401'
         ACCESS_DENIED:
           ResponseParameters:
@@ -663,8 +662,7 @@ Resources:
               Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
               Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
           ResponseTemplates:
-            application/json: '{"codigo":"ACCESS_DENIED","mensaje":"Solicitud rechazada
-              por el gateway.","request_id":"$context.requestId"}'
+            application/json: '{"codigo":"ACCESS_DENIED","mensaje":"Solicitud rechazada por el gateway.","request_id":"$context.requestId"}'
           StatusCode: '403'
         DEFAULT_4XX:
           ResponseParameters:
@@ -674,8 +672,7 @@ Resources:
               Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
               Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
           ResponseTemplates:
-            application/json: '{"codigo":"DEFAULT_4XX","mensaje":"Solicitud rechazada
-              por el gateway.","request_id":"$context.requestId"}'
+            application/json: '{"codigo":"DEFAULT_4XX","mensaje":"Solicitud rechazada por el gateway.","request_id":"$context.requestId"}'
         DEFAULT_5XX:
           ResponseParameters:
             Headers:
@@ -684,8 +681,7 @@ Resources:
               Access-Control-Allow-Headers: '''Content-Type,Authorization,Idempotency-Key'''
               Access-Control-Allow-Methods: '''GET,POST,DELETE,OPTIONS'''
           ResponseTemplates:
-            application/json: '{"codigo":"DEFAULT_5XX","mensaje":"Solicitud rechazada
-              por el gateway.","request_id":"$context.requestId"}'
+            application/json: '{"codigo":"DEFAULT_5XX","mensaje":"Solicitud rechazada por el gateway.","request_id":"$context.requestId"}'
   EventBus:
     Type: AWS::Events::EventBus
     Properties:
@@ -1060,12 +1056,10 @@ Resources:
         - RealtimeApi
         - ApiId
       Name: peajes
-      CodeHandlers: "import { util } from '@aws-appsync/utils';\nexport function onSubscribe(ctx)\
-        \ {\n  const c = ctx.identity.claims;\n  const groups = c['cognito:groups']\
-        \ || [];\n  const toll = c['custom:peaje_id'];\n  if (!groups.includes('operador')\
-        \ || !toll || c.token_use !== 'id') {\n    util.unauthorized();\n  }\n  //\
-        \ Exact channel: blocks wildcard and any other toll.\n  if (ctx.info.channel.path\
-        \ !== '/peajes/' + toll) {\n    util.unauthorized();\n  }\n}\nexport function\
+      CodeHandlers: "import { util } from '@aws-appsync/utils';\nexport function onSubscribe(ctx) {\n  const c = ctx.identity.claims;\n\
+        \  const groups = c['cognito:groups'] || [];\n  const toll = c['custom:peaje_id'];\n  if (!groups.includes('operador')\
+        \ || !toll || c.token_use !== 'id') {\n    util.unauthorized();\n  }\n  // Exact channel: blocks wildcard and any\
+        \ other toll.\n  if (ctx.info.channel.path !== '/peajes/' + toll) {\n    util.unauthorized();\n  }\n}\nexport function\
         \ onPublish(ctx) { return ctx.events; }\n"
   WebhookApiKey:
     Type: AWS::ApiGateway::ApiKey
@@ -1127,6 +1121,7 @@ Resources:
           - guatepass.pasos
           detail-type:
           - paso.registrado
+          - paso.pendiente
         - source:
           - guatepass.saldo
           detail-type:
@@ -1159,6 +1154,7 @@ Resources:
         - DevolucionRealizada
         - PasoRegistrado
         - RecargaAplicada
+        - PasoPendiente
       Targets:
       - Id: Pasos
         Arn:
@@ -1635,6 +1631,9 @@ Resources:
             - Fn::GetAtt:
               - TagsTable
               - Arn
+            - Fn::GetAtt:
+              - PendientesTable
+              - Arn
           - Effect: Allow
             Action: dynamodb:PutItem
             Resource:
@@ -1649,6 +1648,9 @@ Resources:
               - Arn
             - Fn::GetAtt:
               - OutboxTable
+              - Arn
+            - Fn::GetAtt:
+              - EsperasTable
               - Arn
           - Effect: Allow
             Action: dynamodb:UpdateItem
@@ -1665,6 +1667,33 @@ Resources:
             - sqs:ReceiveMessage
             - sqs:DeleteMessage
             - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - PasosQueue
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:Query
+            Resource:
+              Fn::GetAtt:
+              - PendientesTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+            - Fn::GetAtt:
+              - EsperasTable
+              - Arn
+            - Fn::GetAtt:
+              - PendientesTable
+              - Arn
+          - Effect: Allow
+            Action: sqs:SendMessage
             Resource:
               Fn::GetAtt:
               - PasosQueue
@@ -1704,6 +1733,10 @@ Resources:
             Ref: OwnerCarnet
           RECARGA_TIMEOUT_PARAMETER:
             Ref: RecargaTimeoutParameter
+          ESPERAS_TABLE:
+            Ref: EsperasTable
+          PASOS_QUEUE_URL:
+            Ref: PasosQueue
       Events:
         Messages:
           Type: SQS
@@ -1827,6 +1860,167 @@ Resources:
               Ref: Api
             Path: /users/{placa}/tag
             Method: delete
+  RecargarLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-recargar
+      RetentionInDays: 14
+  RecargarRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: RecargarPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-recargar:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+            - Fn::GetAtt:
+              - IdempotenciaTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:UpdateItem
+            Resource:
+              Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt:
+              - MovimientosTable
+              - Arn
+            - Fn::GetAtt:
+              - IdempotenciaTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
+  RecargarFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: RecargarLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-recargar
+      CodeUri: src/
+      Handler: usuarios.recargar.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 512
+      Role:
+        Fn::GetAtt:
+        - RecargarRole
+        - Arn
+      Environment:
+        Variables:
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+          MOVIMIENTOS_TABLE:
+            Ref: MovimientosTable
+          IDEMPOTENCIA_TABLE:
+            Ref: IdempotenciaTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          CLIENT_ID:
+            Ref: UserPoolClient
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+      Events:
+        PostTopup:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /users/{placa}/topup
+            Method: post
+  DrainRecoveryLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-drain-recovery
+      RetentionInDays: 14
+  DrainRecoveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: DrainRecoveryPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-drain-recovery:*
+          - Effect: Allow
+            Action: dynamodb:Scan
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: sqs:SendMessage
+            Resource:
+              Fn::GetAtt:
+              - PasosQueue
+              - Arn
+  DrainRecoveryFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DrainRecoveryLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-drain-recovery
+      CodeUri: src/
+      Handler: pasos.pendientes.recover
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - DrainRecoveryRole
+        - Arn
+      Environment:
+        Variables:
+          ESPERAS_TABLE:
+            Ref: EsperasTable
+          PASOS_QUEUE_URL:
+            Ref: PasosQueue
+      Events:
+        ScheduledRecovery:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled:
+              Fn::If:
+              - BillingEnabled
+              - true
+              - false
 Outputs:
   UsuariosTableName:
     Value:
@@ -2026,6 +2220,12 @@ Outputs:
   BillingConsumerEnabled:
     Value:
       Ref: BillingConsumerEnabled
+  RecargarFunctionName:
+    Value:
+      Ref: RecargarFunction
+  DrainRecoveryFunctionName:
+    Value:
+      Ref: DrainRecoveryFunction
 Conditions:
   BillingEnabled:
     Fn::Equals:
