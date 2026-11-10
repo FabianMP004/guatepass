@@ -72,9 +72,9 @@ def test_preflight_without_token_or_key(setup):
 
 def test_webhook_requires_key(setup):assert call(setup,'/webhook/toll',method='POST')[0]==403
 
-def test_webhook_key_reaches_stub(setup):
+def test_webhook_key_reaches_validation(setup):
     o=setup['outputs'];value=setup['session'].client('apigateway').get_api_key(apiKey=o['WebhookApiKeyId'],includeValue=True)['value']
-    assert call(setup,'/webhook/toll',method='POST',headers={'x-api-key':value})[0]==501
+    assert call(setup,'/webhook/toll',method='POST',headers={'x-api-key':value})[0]==400
 
 def test_gateway_and_lambda_errors_have_cors(setup):
     for path,t in [('/users/'+setup['plate'],None),('/users/OTHER',token(setup))]:

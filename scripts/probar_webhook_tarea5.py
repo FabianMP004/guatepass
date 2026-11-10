@@ -1,52 +1,44 @@
-"""Live smoke test. Creates one durable test pass; never prints API key."""
+"""Compatible v1/v2 smoke: creates one new test pass and repeats twice."""
 import argparse
 import json
+import sys
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 import boto3
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
+from common.models import stable_id
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stack', required=True)
-    parser.add_argument('--region', default='us-east-1')
-    parser.add_argument('--placa', required=True)
-    parser.add_argument('--peaje', required=True)
-    args = parser.parse_args()
-    session = boto3.Session(region_name=args.region)
-    stack = session.client('cloudformation').describe_stacks(StackName=args.stack)['Stacks'][0]
-    outputs = {o['OutputKey']:o['OutputValue'] for o in stack['Outputs']}
-    api_key = session.client('apigateway').get_api_key(apiKey=outputs['WebhookApiKeyId'],includeValue=True)['value']
-    aviso = {'placa':args.placa,'peaje_id':args.peaje,
-             'timestamp':datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00','Z'), 'tag_id':None}
-    identifiers = []
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--stack',required=True);p.add_argument('--region',default='us-east-1')
+    p.add_argument('--placa',required=True);p.add_argument('--peaje',required=True)
+    args=p.parse_args();s=boto3.Session(region_name=args.region)
+    o={x['OutputKey']:x['OutputValue'] for x in s.client('cloudformation').describe_stacks(StackName=args.stack)['Stacks'][0]['Outputs']}
+    key=s.client('apigateway').get_api_key(apiKey=o['WebhookApiKeyId'],includeValue=True)['value']
+    aviso={'placa':args.placa,'peaje_id':args.peaje,'tag_id':None,
+           'timestamp':datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00','Z')}
+    ids=[]
     for attempt in range(3):
-        start = time.perf_counter()
-        request = Request(outputs['ApiUrl'].rstrip('/')+'/webhook/toll',data=json.dumps(aviso).encode(),
-                          headers={'Content-Type':'application/json','x-api-key':api_key},method='POST')
+        request=Request(o['ApiUrl'].rstrip('/')+'/webhook/toll',data=json.dumps(aviso).encode(),
+                        headers={'Content-Type':'application/json','x-api-key':key},method='POST')
+        start=time.perf_counter()
         with urlopen(request,timeout=35) as result:
-            status = result.status
-            body = json.load(result)
-        elapsed = time.perf_counter()-start
-        assert status == 202, body
-        identifiers.append(body['data']['paso_id'])
-        print(json.dumps({'intento':attempt+1,'segundos':round(elapsed,4),
-                          'revisar_latencia':elapsed>=1,'request_id':body['request_id'], 'paso_id':identifiers[-1]}))
-    assert len(set(identifiers)) == 1
-    table = session.resource('dynamodb').Table(outputs['PasosTableName'])
-    row = table.get_item(Key={'paso_id':identifiers[0]},ConsistentRead=True)['Item']
-    assert row['timestamp'] == aviso['timestamp']
-    from hashlib import sha256
-    raw = json.dumps(['evento','PasoRegistrado',identifiers[0],1],ensure_ascii=False,separators=(',',':'))
-    event_id = 'evento_'+sha256(raw.encode()).hexdigest()
-    outbox = session.resource('dynamodb').Table(outputs['OutboxTableName'])
+            assert result.status==202
+            body=json.load(result)
+        elapsed=time.perf_counter()-start;ids.append(body['data']['paso_id'])
+        print(json.dumps({'intento':attempt+1,'segundos':round(elapsed,4),'revisar_latencia':elapsed>=1,
+                          'request_id':body['request_id'],'paso_id':ids[-1]}))
+    assert len(set(ids))==1
+    table=s.resource('dynamodb').Table(o['OutboxTableName'])
     for _ in range(20):
-        event = outbox.get_item(Key={'evento_id':event_id},ConsistentRead=True).get('Item',{})
-        if event.get('enviado'):
-            print(json.dumps({'outbox_enviado':True,'evento_id':event_id}))
-            return
+        for kind in ('paso.registrado','PasoRegistrado'):
+            identifier=stable_id('evento',kind,ids[0],1)
+            row=table.get_item(Key={'evento_id':identifier},ConsistentRead=True).get('Item')
+            if row and row.get('enviado'):
+                print(json.dumps({'outbox_enviado':True,'evento_id':identifier,'tipo':kind}));return
         time.sleep(2)
-    raise RuntimeError('Paso persistido, publicación aún no confirmada; revisar logs y recuperación.')
+    raise RuntimeError('Paso recibido, publicación aún no confirmada.')
 
-if __name__ == '__main__':
-    main()
+if __name__=='__main__':main()

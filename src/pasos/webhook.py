@@ -61,7 +61,7 @@ def _register(aviso, request_id):
     item = dict(value, paso_id=identifier, recibido_en=received, fecha_local=local_date,
                 estado='REGISTRADO', version=1, modalidad=None, monto_centavos=None,
                 peaje_fecha=value['peaje_id']+'#'+local_date, orden=value['timestamp']+'#'+identifier)
-    event = make_event('PasoRegistrado', identifier, 1,
+    event = make_event('paso.registrado', identifier, 1,
                        dict(value, paso_id=identifier, recibido_en=received),
                        request_id, received, os.environ['OWNER_CARNET'])
     try:

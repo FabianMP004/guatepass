@@ -1,9 +1,10 @@
-"""GuatePass contracts v1. Pure helpers; no AWS persistence or JWT validation."""
+"""GuatePass contracts v2 plus immutable v1 compatibility. Pure helpers."""
 from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
+from common.catalogo import SOURCES, validate_payload
 
 TRANSITIONS = {
     'REGISTRADO': {'PENDIENTE','COBRADO','NO_REGISTRADO'},
@@ -53,26 +54,31 @@ def replay(amount_centavos, stored):
     return deepcopy(stored['response'])
 
 def validate_event(event):
-    if not isinstance(event,dict) or event.get('source')!='guatepass': raise ValueError('INVALID_SOURCE')
-    if event.get('detail-type') not in EVENTS: raise ValueError('INVALID_EVENT_TYPE')
+    if not isinstance(event,dict): raise ValueError('INVALID_EVENT')
+    kind=event.get('detail-type')
+    canonical=kind in SOURCES
+    if not canonical and kind not in EVENTS: raise ValueError('INVALID_EVENT_TYPE')
+    expected_source=SOURCES[kind] if canonical else 'guatepass'
+    if event.get('source')!=expected_source: raise ValueError('INVALID_SOURCE')
     d=event.get('detail')
     if not isinstance(d,dict): raise ValueError('INVALID_DETAIL')
     if d.get('grupo')!='guatepass': raise ValueError('INVALID_GROUP')
     for field in ('carnet','evento_id','aggregate_id','request_id','occurred_at'):
         if not isinstance(d.get(field),str) or not d[field].strip(): raise ValueError('MISSING_'+field.upper())
-    if type(d.get('schema_version')) is not int or d['schema_version']!=1: raise ValueError('INVALID_VERSION')
+    if type(d.get('schema_version')) is not int or d['schema_version']!=(2 if canonical else 1): raise ValueError('INVALID_VERSION')
     if type(d.get('aggregate_version')) is not int or d['aggregate_version']<1: raise ValueError('INVALID_AGGREGATE_VERSION')
     utc_timestamp(d['occurred_at'])
     expected=stable_id('evento',event['detail-type'],d['aggregate_id'],d['aggregate_version'])
     if d['evento_id']!=expected: raise ValueError('INVALID_EVENT_ID')
+    if canonical: validate_payload(kind,d)
     return event
 
 def make_event(event_type, aggregate_id, version, payload, request_id, occurred_at, owner_carnet, *, sub=None, assignments=None):
     """sub and assignments MUST come from validated identity and server storage."""
     carnet=(assignments or {}).get(sub,owner_carnet) if sub else owner_carnet
     detail=deepcopy(payload)
-    detail.update(grupo='guatepass',carnet=carnet,schema_version=1,
+    detail.update(grupo='guatepass',carnet=carnet,schema_version=2 if event_type in SOURCES else 1,
         evento_id=stable_id('evento',event_type,aggregate_id,version),
         aggregate_id=aggregate_id,aggregate_version=version,
         request_id=request_id,occurred_at=utc_timestamp(occurred_at))
-    return validate_event({'source':'guatepass','detail-type':event_type,'detail':detail})
+    return validate_event({'source':SOURCES.get(event_type,'guatepass'),'detail-type':event_type,'detail':detail})
