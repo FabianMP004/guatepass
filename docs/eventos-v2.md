@@ -1,4 +1,4 @@
-# GuatePass — catálogo de eventos v2.0.0
+# GuatePass — catálogo de eventos v2.1.0
 
 Esta versión adopta los source y detail-type de la tabla de tarea 6. Es un cambio
 incompatible de nombres: sobres nuevos llevan schema_version=2. El catálogo v1
@@ -31,8 +31,12 @@ No usar el id asignado por EventBridge para deduplicar.
 
 Las conexiones de tiempo real y esperas no están implementadas por este paquete.
 Añadir sus reglas/targets y DLQ cuando existan sus consumidores (tareas 8–10 y 12).
-Las colas de pasos y registro aún no tienen Lambda consumidora; no descartar sus
-mensajes con handlers vacíos. Implementarlas antes de vencer la retención.
+Tarea 7 añade CobrarFunction a cola-pasos, desactivada por defecto hasta revisar
+identidades y mensajes acumulados. Procesa paso.registrado y PasoRegistrado.
+El cobro ordenado de pendientes para saldo.recargado/saldo.devuelto se conectará
+en la tarea de recargas: esos mensajes aún fallan explícitamente y van a
+reintentos/DLQ, nunca se confirman sin procesar. No producirlos hasta implementar
+ese flujo. Cola-registro sigue sin consumidor hasta la tarea del externo.
 
 ## Snapshot requerido por transición
 
@@ -147,3 +151,13 @@ events.start_replay(
 
 Monitorear describe_replay y registros de notificaciones. No esperar cambios de
 saldo por replay dirigido solo a notificaciones.
+
+## Adiciones compatibles de tarea 7
+
+Los eventos de paso incluyen modalidad y monto_centavos fijados al clasificar.
+COBRADO y PENDIENTE incluyen saldo_centavos capturado en su transacción.
+La clasificación incrementa version sin emitir un evento público: las versiones
+son monótonas, no necesariamente consecutivas en el bus. schema_version sigue 2.
+TagAsociado/TagDesactivado conservan el contrato v1, source guatepass, agregado
+usuario:PLACA y versión del usuario; contienen placa, tag_id y activo. Se guardan
+en Outbox y Archive; esta tarea no añade notificaciones de tags.

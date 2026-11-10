@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: GuatePass task 6 - routing queues and simulated notifications
+Description: GuatePass task 7 - atomic wallet and tag lifecycle
 Parameters:
   Environment:
     Type: String
@@ -23,6 +23,13 @@ Parameters:
     Default: 86400
     MinValue: 1
     MaxValue: 604800
+  BillingConsumerEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+    - 'false'
+    - 'true'
+    Description: Enable only after reviewing queued passes and assigning driver carnets.
 Resources:
   UsuariosTable:
     Type: AWS::DynamoDB::Table
@@ -845,16 +852,24 @@ Resources:
           - Effect: Allow
             Action: dynamodb:GetItem
             Resource:
-              Fn::GetAtt: [PasosTable, Arn]
+              Fn::GetAtt:
+              - PasosTable
+              - Arn
           - Effect: Allow
             Action: dynamodb:ConditionCheckItem
             Resource:
-              Fn::GetAtt: [PeajesTable, Arn]
+              Fn::GetAtt:
+              - PeajesTable
+              - Arn
           - Effect: Allow
             Action: dynamodb:PutItem
             Resource:
-            - Fn::GetAtt: [PasosTable, Arn]
-            - Fn::GetAtt: [OutboxTable, Arn]
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
   WebhookFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1566,6 +1581,252 @@ Resources:
             MaximumBatchingWindowInSeconds: 0
             FunctionResponseTypes:
             - ReportBatchItemFailures
+  CobrarLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-cobrar
+      RetentionInDays: 14
+  CobrarRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: CobrarPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-cobrar:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+            - Fn::GetAtt:
+              - PeajesTable
+              - Arn
+            - Fn::GetAtt:
+              - TagsTable
+              - Arn
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:ConditionCheckItem
+            Resource:
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+            - Fn::GetAtt:
+              - PeajesTable
+              - Arn
+            - Fn::GetAtt:
+              - TagsTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - PendientesTable
+              - Arn
+            - Fn::GetAtt:
+              - MovimientosTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:UpdateItem
+            Resource:
+              Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+          - Effect: Allow
+            Action: ssm:GetParameter
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RecargaTimeoutParameter}
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - PasosQueue
+              - Arn
+  CobrarFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: CobrarLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-cobrar
+      CodeUri: src/
+      Handler: pasos.cobrar.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 512
+      Role:
+        Fn::GetAtt:
+        - CobrarRole
+        - Arn
+      Environment:
+        Variables:
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+          PEAJES_TABLE:
+            Ref: PeajesTable
+          TAGS_TABLE:
+            Ref: TagsTable
+          PASOS_TABLE:
+            Ref: PasosTable
+          PENDIENTES_TABLE:
+            Ref: PendientesTable
+          MOVIMIENTOS_TABLE:
+            Ref: MovimientosTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          OWNER_CARNET:
+            Ref: OwnerCarnet
+          RECARGA_TIMEOUT_PARAMETER:
+            Ref: RecargaTimeoutParameter
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - PasosQueue
+              - Arn
+            Enabled:
+              Fn::If:
+              - BillingEnabled
+              - true
+              - false
+            BatchSize: 5
+            MaximumBatchingWindowInSeconds: 0
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
+  TagsLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-tags
+      RetentionInDays: 14
+  TagsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: TagsPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-tags:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+            - Fn::GetAtt:
+              - TagsTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:ConditionCheckItem
+            Resource:
+              Fn::GetAtt:
+              - TagsTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:UpdateItem
+            Resource:
+              Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt:
+              - TagsTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
+  TagsFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: TagsLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-tags
+      CodeUri: src/
+      Handler: usuarios.tags.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 512
+      Role:
+        Fn::GetAtt:
+        - TagsRole
+        - Arn
+      Environment:
+        Variables:
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+          TAGS_TABLE:
+            Ref: TagsTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          CLIENT_ID:
+            Ref: UserPoolClient
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+      Events:
+        GetTag:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /users/{placa}/tag
+            Method: get
+        PostTag:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /users/{placa}/tag
+            Method: post
+        DeleteTag:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /users/{placa}/tag
+            Method: delete
 Outputs:
   UsuariosTableName:
     Value:
@@ -1667,7 +1928,6 @@ Outputs:
   OwnerCarnetValue:
     Value:
       Ref: OwnerCarnet
-
   PasosQueueUrl:
     Value:
       Ref: PasosQueue
@@ -1757,3 +2017,17 @@ Outputs:
   NotificarFunctionName:
     Value:
       Ref: NotificarFunction
+  CobrarFunctionName:
+    Value:
+      Ref: CobrarFunction
+  TagsFunctionName:
+    Value:
+      Ref: TagsFunction
+  BillingConsumerEnabled:
+    Value:
+      Ref: BillingConsumerEnabled
+Conditions:
+  BillingEnabled:
+    Fn::Equals:
+    - Ref: BillingConsumerEnabled
+    - 'true'

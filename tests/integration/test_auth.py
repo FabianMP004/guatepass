@@ -40,10 +40,13 @@ def setup():
         for plate in plates:table.delete_item(Key={'placa':plate})
         for name in names:cog.admin_delete_user(UserPoolId=o['UserPoolId'],Username=name)
 
-def call(s,path,token=None,method='GET',headers=None):
+def call(s,path,token=None,method='GET',headers=None,body=None):
     h={'Origin':s['outputs']['PortalUrl'],**(headers or {})}
     if token:h['Authorization']=token
-    req=Request(s['outputs']['ApiUrl']+path,headers=h,method=method)
+    data=None
+    if body is not None:
+        data=json.dumps(body).encode('utf-8');h['Content-Type']='application/json'
+    req=Request(s['outputs']['ApiUrl']+path,headers=h,method=method,data=data)
     try:
         with urlopen(req,timeout=30) as r:return r.status,dict(r.headers),json.loads(r.read() or '{}')
     except HTTPError as e:return e.code,dict(e.headers),json.loads(e.read() or '{}')
@@ -114,3 +117,26 @@ def test_operator_subscription_own_toll(setup):assert subscription(setup,'/peaje
 def test_operator_subscription_other_toll_denied(setup):assert subscription(setup,'/peajes/OTHER')['type']=='subscribe_error'
 
 def test_operator_subscription_wildcard_denied(setup):assert subscription(setup,'/peajes/*')['type']=='subscribe_error'
+
+
+def test_tag_routes_authorization_and_lifecycle(setup):
+    path='/users/'+setup['plate']+'/tag'
+    tag_id='IT7-'+uuid.uuid4().hex
+    assert call(setup,path)[0]==401
+    assert call(setup,path,token(setup,'operador'))[0]==403
+    assert call(setup,'/users/OTHER-PLATE/tag',token(setup))[0]==403
+    assert call(setup,path,method='OPTIONS',headers={'Access-Control-Request-Method':'POST'})[0]==200
+    try:
+        for _ in range(2):
+            status,_,body=call(setup,path,token(setup),method='POST',body={'tag_id':tag_id})
+            assert status==200,body
+            assert body['data']=={'tag_id':tag_id,'placa':setup['plate'],'activo':True}
+        assert call(setup,path,token(setup))[2]['data']['tag']=={'tag_id':tag_id,'activo':True}
+        for _ in range(2):
+            status,_,body=call(setup,path,token(setup),method='DELETE')
+            assert status==200,body
+            assert body['data']=={'tag_id':tag_id,'activo':False}
+        assert call(setup,path,token(setup))[2]['data']=={'tag':None}
+        assert call(setup,'/users/'+setup['plate'],token(setup))[2]['data']['saldo']=='20.00'
+    finally:
+        call(setup,path,token(setup),method='DELETE')
