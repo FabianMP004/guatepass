@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: GuatePass task 5 - durable ingestion and recoverable events
+Description: GuatePass task 6 - routing queues and simulated notifications
 Parameters:
   Environment:
     Type: String
@@ -1075,6 +1075,497 @@ Resources:
       KeyType: API_KEY
       UsagePlanId:
         Ref: WebhookUsagePlan
+  PasosDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-cola-pasos-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        sourceQueueArns:
+        - Fn::Sub: arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-cola-pasos
+  PasosQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-cola-pasos
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - PasosDLQ
+          - Arn
+        maxReceiveCount: 5
+  PasosRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      State: ENABLED
+      EventPattern:
+        $or:
+        - source:
+          - guatepass.pasos
+          detail-type:
+          - paso.registrado
+        - source:
+          - guatepass.saldo
+          detail-type:
+          - saldo.devuelto
+          - saldo.recargado
+      Targets:
+      - Id: Pasos
+        Arn:
+          Fn::GetAtt:
+          - PasosQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  PasosLegacyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      State: ENABLED
+      EventPattern:
+        source:
+        - guatepass
+        detail-type:
+        - DevolucionRealizada
+        - PasoRegistrado
+        - RecargaAplicada
+      Targets:
+      - Id: Pasos
+        Arn:
+          Fn::GetAtt:
+          - PasosQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  PasosQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: PasosQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - PasosQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - PasosRule
+                - Arn
+              - Fn::GetAtt:
+                - PasosLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  RegistroDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-cola-registro-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        sourceQueueArns:
+        - Fn::Sub: arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-cola-registro
+  RegistroQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-cola-registro
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - RegistroDLQ
+          - Arn
+        maxReceiveCount: 5
+  RegistroRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      State: ENABLED
+      EventPattern:
+        source:
+        - guatepass.pasos
+        detail-type:
+        - paso.no_registrado
+      Targets:
+      - Id: Registro
+        Arn:
+          Fn::GetAtt:
+          - RegistroQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  RegistroLegacyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      State: ENABLED
+      EventPattern:
+        source:
+        - guatepass
+        detail-type:
+        - PasoNoRegistrado
+      Targets:
+      - Id: Registro
+        Arn:
+          Fn::GetAtt:
+          - RegistroQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  RegistroQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: RegistroQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - RegistroQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - RegistroRule
+                - Arn
+              - Fn::GetAtt:
+                - RegistroLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  NotificacionesDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-cola-notificaciones-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+      RedriveAllowPolicy:
+        redrivePermission: byQueue
+        sourceQueueArns:
+        - Fn::Sub: arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:${AWS::StackName}-cola-notificaciones
+  NotificacionesQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-cola-notificaciones
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - NotificacionesDLQ
+          - Arn
+        maxReceiveCount: 5
+  NotificacionesRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      State: ENABLED
+      EventPattern:
+        $or:
+        - source:
+          - guatepass.disputas
+          detail-type:
+          - disputa.abierta
+          - disputa.resuelta
+        - source:
+          - guatepass.registro
+          detail-type:
+          - invitacion.solicitada
+        - source:
+          - guatepass.pasos
+          detail-type:
+          - paso.cobrado
+          - paso.facturado
+          - paso.pendiente
+        - source:
+          - guatepass.recaudacion
+          detail-type:
+          - recaudacion.calculada
+        - source:
+          - guatepass.saldo
+          detail-type:
+          - saldo.devuelto
+          - saldo.recargado
+      Targets:
+      - Id: Notificaciones
+        Arn:
+          Fn::GetAtt:
+          - NotificacionesQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  NotificacionesLegacyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      State: ENABLED
+      EventPattern:
+        source:
+        - guatepass
+        detail-type:
+        - CobroRealizado
+        - DevolucionRealizada
+        - DisputaAbierta
+        - DisputaRechazada
+        - FacturaEmitida
+        - PasoPendiente
+        - RecargaAplicada
+        - RecaudacionCalculada
+      Targets:
+      - Id: Notificaciones
+        Arn:
+          Fn::GetAtt:
+          - NotificacionesQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  NotificacionesQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: NotificacionesQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - NotificacionesQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - NotificacionesRule
+                - Arn
+              - Fn::GetAtt:
+                - NotificacionesLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  RoutingDeliveryDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-routing-delivery-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  RoutingDeliveryPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: RoutingDeliveryDLQ
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - PasosRule
+                - Arn
+              - Fn::GetAtt:
+                - PasosLegacyRule
+                - Arn
+              - Fn::GetAtt:
+                - RegistroRule
+                - Arn
+              - Fn::GetAtt:
+                - RegistroLegacyRule
+                - Arn
+              - Fn::GetAtt:
+                - NotificacionesRule
+                - Arn
+              - Fn::GetAtt:
+                - NotificacionesLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  GuatePassArchive:
+    Type: AWS::Events::Archive
+    Properties:
+      SourceArn:
+        Fn::GetAtt:
+        - EventBus
+        - Arn
+      RetentionDays: 30
+      EventPattern:
+        source:
+        - guatepass
+        - guatepass.disputas
+        - guatepass.pasos
+        - guatepass.recaudacion
+        - guatepass.registro
+        - guatepass.saldo
+  NotificarLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-notificar
+      RetentionInDays: 14
+  NotificarRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: NotificarPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-notificar:*
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - NotificacionesQueue
+              - Arn
+          - Effect: Allow
+            Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            Resource:
+              Fn::GetAtt:
+              - NotificacionesTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+  NotificarFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: NotificarLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-notificar
+      CodeUri: src/
+      Handler: eventos.notificar.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - NotificarRole
+        - Arn
+      Environment:
+        Variables:
+          NOTIFICACIONES_TABLE:
+            Ref: NotificacionesTable
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - NotificacionesQueue
+              - Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 0
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
 Outputs:
   UsuariosTableName:
     Value:
@@ -1176,3 +1667,93 @@ Outputs:
   OwnerCarnetValue:
     Value:
       Ref: OwnerCarnet
+
+  PasosQueueUrl:
+    Value:
+      Ref: PasosQueue
+  PasosQueueArn:
+    Value:
+      Fn::GetAtt:
+      - PasosQueue
+      - Arn
+  PasosDLQUrl:
+    Value:
+      Ref: PasosDLQ
+  PasosDLQArn:
+    Value:
+      Fn::GetAtt:
+      - PasosDLQ
+      - Arn
+  RegistroQueueUrl:
+    Value:
+      Ref: RegistroQueue
+  RegistroQueueArn:
+    Value:
+      Fn::GetAtt:
+      - RegistroQueue
+      - Arn
+  RegistroDLQUrl:
+    Value:
+      Ref: RegistroDLQ
+  RegistroDLQArn:
+    Value:
+      Fn::GetAtt:
+      - RegistroDLQ
+      - Arn
+  NotificacionesQueueUrl:
+    Value:
+      Ref: NotificacionesQueue
+  NotificacionesQueueArn:
+    Value:
+      Fn::GetAtt:
+      - NotificacionesQueue
+      - Arn
+  NotificacionesDLQUrl:
+    Value:
+      Ref: NotificacionesDLQ
+  NotificacionesDLQArn:
+    Value:
+      Fn::GetAtt:
+      - NotificacionesDLQ
+      - Arn
+  PasosRuleArn:
+    Value:
+      Fn::GetAtt:
+      - PasosRule
+      - Arn
+  PasosLegacyRuleArn:
+    Value:
+      Fn::GetAtt:
+      - PasosLegacyRule
+      - Arn
+  RegistroRuleArn:
+    Value:
+      Fn::GetAtt:
+      - RegistroRule
+      - Arn
+  RegistroLegacyRuleArn:
+    Value:
+      Fn::GetAtt:
+      - RegistroLegacyRule
+      - Arn
+  NotificacionesRuleArn:
+    Value:
+      Fn::GetAtt:
+      - NotificacionesRule
+      - Arn
+  NotificacionesLegacyRuleArn:
+    Value:
+      Fn::GetAtt:
+      - NotificacionesLegacyRule
+      - Arn
+  RoutingDeliveryDLQUrl:
+    Value:
+      Ref: RoutingDeliveryDLQ
+  GuatePassArchiveArn:
+    Value:
+      Fn::GetAtt:
+      - GuatePassArchive
+      - Arn
+  NotificarFunctionName:
+    Value:
+      Ref: NotificarFunction

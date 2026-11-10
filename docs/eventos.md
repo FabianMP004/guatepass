@@ -1,5 +1,9 @@
 # GuatePass — catálogo de eventos v1.0.0
 
+> HISTÓRICO desde tarea 6. Para productores nuevos usar `eventos-v2.md`.
+> Los registros v1 existentes se publican sin convertir source, detail-type,
+> schema_version ni evento_id. Las reglas Legacy permiten procesarlos.
+
 Contrato propuesto para revisión conjunta. source siempre guatepass; schema_version=1.
 Los eventos son hechos confirmados después de persistir. Publicación recuperable desde outbox/stream; no asumir atomicidad entre escribir DynamoDB y llamar EventBridge. El productor debe revisar fallos parciales y reintentar el mismo evento. Tono implementará transporte, colas y DLQ en tareas posteriores.
 
