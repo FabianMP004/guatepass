@@ -91,9 +91,9 @@ def test_custom_attributes_not_client_writable(setup):
         setup['session'].client('cognito-idp').update_user_attributes(AccessToken=setup['tokens']['conductor']['AccessToken'],UserAttributes=[{'Name':'custom:placa','Value':'OTHER'}])
     assert exc.value.response['Error']['Code']=='NotAuthorizedException'
 
-def subscription(s,channel):
+def subscription(s,channel,role='operador'):
     import websocket
-    o=s['outputs'];auth={'host':o['RealtimeHttpDomain'],'Authorization':token(s,'operador')}
+    o=s['outputs'];auth={'host':o['RealtimeHttpDomain'],'Authorization':token(s,role)}
     encoded=base64.urlsafe_b64encode(json.dumps(auth).encode()).decode().rstrip('=')
     ws=websocket.create_connection('wss://'+o['RealtimeDomain']+'/event/realtime',subprotocols=['aws-appsync-event-ws','header-'+encoded],timeout=20)
     try:
@@ -112,11 +112,17 @@ def subscription(s,channel):
         pytest.fail('Sin respuesta de suscripción.')
     finally:ws.close()
 
-def test_operator_subscription_own_toll(setup):assert subscription(setup,'/peajes/'+setup['toll'])['type']=='subscribe_success'
+def test_operator_subscription_own_toll(setup):
+    from eventos.tiempo_real import channel_for
+    assert subscription(setup,channel_for(setup['toll']))['type']=='subscribe_success'
 
 def test_operator_subscription_other_toll_denied(setup):assert subscription(setup,'/peajes/OTHER')['type']=='subscribe_error'
 
 def test_operator_subscription_wildcard_denied(setup):assert subscription(setup,'/peajes/*')['type']=='subscribe_error'
+
+def test_driver_subscription_denied(setup):
+    from eventos.tiempo_real import channel_for
+    assert subscription(setup,channel_for(setup['toll']),role='conductor')['type']=='subscribe_error'
 
 
 def test_tag_routes_authorization_and_lifecycle(setup):
