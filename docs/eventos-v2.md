@@ -17,8 +17,8 @@ No usar el id asignado por EventBridge para deduplicar.
 | source | detail-type | Destinos de negocio | Conexiones activas tras tarea 8 |
 |---|---|---|---|
 | guatepass.pasos | paso.registrado | cobro y tiempo real | cola-pasos |
-| guatepass.pasos | paso.cobrado | notificación, tiempo real, cierre de espera | cola-notificaciones |
-| guatepass.pasos | paso.pendiente | inicio de espera, notificación, tiempo real, reintento de drenaje | cola-pasos, cola-notificaciones |
+| guatepass.pasos | paso.cobrado | notificación, tiempo real, cierre de espera Standard | cola-notificaciones |
+| guatepass.pasos | paso.pendiente | inicio de espera Standard, notificación, tiempo real, reintento de drenaje | cola-pasos, cola-notificaciones |
 | guatepass.pasos | paso.no_registrado | registro y tiempo real | cola-registro |
 | guatepass.pasos | paso.no_identificado | tiempo real | pendiente del consumidor de tiempo real |
 | guatepass.pasos | paso.facturado | notificación y tiempo real | cola-notificaciones |
@@ -161,3 +161,7 @@ son monótonas, no necesariamente consecutivas en el bus. schema_version sigue 2
 TagAsociado/TagDesactivado conservan el contrato v1, source guatepass, agregado
 usuario:PLACA y versión del usuario; contienen placa, tag_id y activo. Se guardan
 en Outbox y Archive; esta tarea no añade notificaciones de tags.
+
+## Tarea 9: espera de recarga
+
+Las reglas de `paso.pendiente` y `paso.cobrado` envían los eventos a colas separadas para iniciar o completar la espera. EventBridge y SQS pueden repetir mensajes. La ejecución Standard usa el identificador del paso como nombre y el plazo `vence_en` guardado; un retry no reinicia 24 horas. El callback token solo existe en Esperas y el backend. Tras `States.Timeout`, la factura se escribe con PASOS/PENDIENTES/FACTURAS/OUTBOX en una transacción. La factura no cambia saldo ni produce movimiento COBRO.
