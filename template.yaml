@@ -2021,6 +2021,818 @@ Resources:
               - BillingEnabled
               - true
               - false
+  CheckWaitLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-check-wait
+      RetentionInDays: 14
+  CheckWaitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: CheckWaitPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-check-wait:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+              Fn::GetAtt:
+              - PasosTable
+              - Arn
+  CheckWaitFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: CheckWaitLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-check-wait
+      CodeUri: src/
+      Handler: flujos.iniciar.check_handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - CheckWaitRole
+        - Arn
+      Environment:
+        Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+  RegisterTokenLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-register-token
+      RetentionInDays: 14
+  RegisterTokenRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: RegisterTokenPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-register-token:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - EsperasTable
+              - Arn
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: states:SendTaskSuccess
+            Resource: '*'
+  RegisterTokenFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: RegisterTokenLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-register-token
+      CodeUri: src/
+      Handler: flujos.registrar_token.registrar_token
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - RegisterTokenRole
+        - Arn
+      Environment:
+        Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+          ESPERAS_TABLE:
+            Ref: EsperasTable
+  VencerWaitLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-vencer-wait
+      RetentionInDays: 14
+  VencerWaitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: VencerWaitPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-vencer-wait:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - PendientesTable
+              - Arn
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - FacturasTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+              Fn::GetAtt:
+              - PendientesTable
+              - Arn
+  VencerWaitFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: VencerWaitLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-vencer-wait
+      CodeUri: src/
+      Handler: flujos.vencer.vencer
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - VencerWaitRole
+        - Arn
+      Environment:
+        Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+          PENDIENTES_TABLE:
+            Ref: PendientesTable
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+          FACTURAS_TABLE:
+            Ref: FacturasTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+  EsperaRecargaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: states.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: InvokeWaitTasks
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource:
+            - Fn::GetAtt:
+              - CheckWaitFunction
+              - Arn
+            - Fn::GetAtt:
+              - RegisterTokenFunction
+              - Arn
+            - Fn::GetAtt:
+              - VencerWaitFunction
+              - Arn
+  EsperaRecarga:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-espera-recarga
+      Type: STANDARD
+      DefinitionUri: statemachines/espera_recarga.asl.json
+      DefinitionSubstitutions:
+        StartWaitArn:
+          Fn::GetAtt:
+          - CheckWaitFunction
+          - Arn
+        RegisterTokenArn:
+          Fn::GetAtt:
+          - RegisterTokenFunction
+          - Arn
+        VencerArn:
+          Fn::GetAtt:
+          - VencerWaitFunction
+          - Arn
+      Role:
+        Fn::GetAtt:
+        - EsperaRecargaRole
+        - Arn
+  WaitStartDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-inicio-recarga-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  WaitStartQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-inicio-recarga
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - WaitStartDLQ
+          - Arn
+        maxReceiveCount: 5
+  WaitStartRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      EventPattern:
+        source:
+        - guatepass.pasos
+        detail-type:
+        - paso.pendiente
+      State: ENABLED
+      Targets:
+      - Id: WaitStart
+        Arn:
+          Fn::GetAtt:
+          - WaitStartQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  WaitStartLegacyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      EventPattern:
+        source:
+        - guatepass
+        detail-type:
+        - PasoPendiente
+      State: ENABLED
+      Targets:
+      - Id: WaitStart
+        Arn:
+          Fn::GetAtt:
+          - WaitStartQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  WaitStartQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: WaitStartQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - WaitStartQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - WaitStartRule
+                - Arn
+              - Fn::GetAtt:
+                - WaitStartLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  WaitCompleteDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-fin-recarga-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  WaitCompleteQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-fin-recarga
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - WaitCompleteDLQ
+          - Arn
+        maxReceiveCount: 5
+  WaitCompleteRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      EventPattern:
+        source:
+        - guatepass.pasos
+        detail-type:
+        - paso.cobrado
+      State: ENABLED
+      Targets:
+      - Id: WaitComplete
+        Arn:
+          Fn::GetAtt:
+          - WaitCompleteQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  WaitCompleteLegacyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      EventPattern:
+        source:
+        - guatepass
+        detail-type:
+        - CobroRealizado
+      State: ENABLED
+      Targets:
+      - Id: WaitComplete
+        Arn:
+          Fn::GetAtt:
+          - WaitCompleteQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  WaitCompleteQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: WaitCompleteQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - WaitCompleteQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - WaitCompleteRule
+                - Arn
+              - Fn::GetAtt:
+                - WaitCompleteLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  StartWaitLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-start-wait
+      RetentionInDays: 14
+  StartWaitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: StartWaitPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-start-wait:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - PendientesTable
+              - Arn
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - FacturasTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+              Fn::GetAtt:
+              - PendientesTable
+              - Arn
+          - Effect: Allow
+            Action: states:StartExecution
+            Resource:
+              Ref: EsperaRecarga
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - WaitStartQueue
+              - Arn
+          - Effect: Allow
+            Action: states:DescribeExecution
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-espera-recarga:*
+  StartWaitFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: StartWaitLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-start-wait
+      CodeUri: src/
+      Handler: flujos.iniciar.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - StartWaitRole
+        - Arn
+      Environment:
+        Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+          PENDIENTES_TABLE:
+            Ref: PendientesTable
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+          FACTURAS_TABLE:
+            Ref: FacturasTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          STATE_MACHINE_ARN:
+            Ref: EsperaRecarga
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - WaitStartQueue
+              - Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
+            Enabled:
+              Fn::If:
+              - BillingEnabled
+              - true
+              - false
+  CompleteWaitLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-complete-wait
+      RetentionInDays: 14
+  CompleteWaitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: CompleteWaitPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-complete-wait:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - EsperasTable
+              - Arn
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: states:SendTaskSuccess
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - WaitCompleteQueue
+              - Arn
+  CompleteWaitFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: CompleteWaitLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-complete-wait
+      CodeUri: src/
+      Handler: flujos.completar.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - CompleteWaitRole
+        - Arn
+      Environment:
+        Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+          ESPERAS_TABLE:
+            Ref: EsperasTable
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - WaitCompleteQueue
+              - Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
+            Enabled:
+              Fn::If:
+              - BillingEnabled
+              - true
+              - false
+  ReconcileWaitLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-reconcile-wait
+      RetentionInDays: 14
+  ReconcileWaitRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: ReconcileWaitPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-reconcile-wait:*
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - PendientesTable
+              - Arn
+            - Fn::GetAtt:
+              - UsuariosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - FacturasTable
+              - Arn
+            - Fn::GetAtt:
+              - OutboxTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+              Fn::GetAtt:
+              - PendientesTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:GetItem
+            Resource:
+            - Fn::GetAtt:
+              - EsperasTable
+              - Arn
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:PutItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: dynamodb:DeleteItem
+            Resource:
+              Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: states:SendTaskSuccess
+            Resource: '*'
+          - Effect: Allow
+            Action: dynamodb:Scan
+            Resource:
+            - Fn::GetAtt:
+              - PasosTable
+              - Arn
+            - Fn::GetAtt:
+              - EsperasTable
+              - Arn
+          - Effect: Allow
+            Action: states:StartExecution
+            Resource:
+              Ref: EsperaRecarga
+          - Effect: Allow
+            Action: states:DescribeExecution
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-espera-recarga:*
+  ReconcileWaitFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: ReconcileWaitLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-reconcile-wait
+      CodeUri: src/
+      Handler: flujos.reconciliar.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - ReconcileWaitRole
+        - Arn
+      Environment:
+        Variables:
+          PASOS_TABLE:
+            Ref: PasosTable
+          PENDIENTES_TABLE:
+            Ref: PendientesTable
+          USUARIOS_TABLE:
+            Ref: UsuariosTable
+          FACTURAS_TABLE:
+            Ref: FacturasTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+          ESPERAS_TABLE:
+            Ref: EsperasTable
+          STATE_MACHINE_ARN:
+            Ref: EsperaRecarga
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled:
+              Fn::If:
+              - BillingEnabled
+              - true
+              - false
 Outputs:
   UsuariosTableName:
     Value:
@@ -2226,6 +3038,33 @@ Outputs:
   DrainRecoveryFunctionName:
     Value:
       Ref: DrainRecoveryFunction
+  CheckWaitFunctionName:
+    Value:
+      Ref: CheckWaitFunction
+  RegisterTokenFunctionName:
+    Value:
+      Ref: RegisterTokenFunction
+  VencerWaitFunctionName:
+    Value:
+      Ref: VencerWaitFunction
+  EsperaRecargaArn:
+    Value:
+      Ref: EsperaRecarga
+  WaitStartQueueUrl:
+    Value:
+      Ref: WaitStartQueue
+  WaitCompleteQueueUrl:
+    Value:
+      Ref: WaitCompleteQueue
+  StartWaitFunctionName:
+    Value:
+      Ref: StartWaitFunction
+  CompleteWaitFunctionName:
+    Value:
+      Ref: CompleteWaitFunction
+  ReconcileWaitFunctionName:
+    Value:
+      Ref: ReconcileWaitFunction
 Conditions:
   BillingEnabled:
     Fn::Equals:

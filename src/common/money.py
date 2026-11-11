@@ -319,3 +319,62 @@ def cobrar_paso(paso_id: str) -> str:
                 raise
             d.backoff(attempt)
     raise RuntimeError('RETRIES_EXHAUSTED')
+
+
+def invoice_expired_pending(paso_id: str) -> str:
+    """Race-safe invoice; no wallet debit and no charge movement."""
+    if not isinstance(paso_id, str) or not paso_id:
+        raise ValueError('INVALID_PASO_ID')
+    db = d.client()
+    for attempt in range(MAX_ATTEMPTS):
+        paso = d.get(db, 'PASOS', {'paso_id': paso_id})
+        if not paso or paso['estado'] != 'PENDIENTE':
+            return 'SIN_CAMBIO'
+        current = now()
+        due = datetime.fromisoformat(paso['vence_en'].replace('Z', '+00:00'))
+        if due.tzinfo is None:
+            raise ValueError('INVALID_DEADLINE')
+        if current < due:
+            return 'NO_VENCIDO'
+        pending = d.get(db, 'PENDIENTES', pending_key(paso))
+        if not pending or pending.get('paso_id') != paso_id:
+            # A concurrent settlement may have removed the row.
+            d.backoff(attempt)
+            continue
+        user = d.get(db, 'USUARIOS', {'placa': paso['placa']})
+        identity(user)
+        if user['sub'] != paso['propietario_sub']:
+            raise ValueError('PASS_OWNER_CHANGED')
+        amount = paso['monto_centavos'] + 2500
+        factura_id = stable_id('factura', paso_id, 'PLAZO_VENCIDO')
+        local = current.astimezone(ZoneInfo('America/Guatemala')).date().isoformat()
+        issued = timestamp(current)
+        nit = user.get('NIT') or user.get('nit')
+        if not isinstance(nit, str) or not nit.strip():
+            raise ValueError('FISCAL_DATA_MISSING')
+        invoice = {'factura_id': factura_id, 'paso_id': paso_id, 'placa': paso['placa'],
+            'peaje_id': paso['peaje_id'], 'monto_centavos': amount,
+            'tarifa_centavos': paso['monto_centavos'], 'recargo_centavos': 2500,
+            'concepto': 'PLAZO_VENCIDO', 'numero': 'GP-' + factura_id,
+            'fecha': local, 'emitida_en': issued, 'orden': issued + '#' + factura_id,
+            'peaje_fecha': paso['peaje_id'] + '#' + local,
+            'NIT': nit, 'nombre': user.get('nombre', ''), 'estado': 'POR_COBRAR',
+            'contribuyente': {'nombre': user.get('nombre', ''), 'nit': nit}}
+        final = dict(paso, estado='FACTURADO', factura_id=factura_id,
+                     version=paso['version'] + 1, facturado_en=issued)
+        payload = dict(payload_for(final), factura_id=factura_id, concepto='PLAZO_VENCIDO',
+                       monto_centavos=amount, facturado_en=issued)
+        try:
+            transact(db, [d.put('PASOS', final, paso,
+                            ['version', 'estado', 'monto_centavos', 'vence_en']),
+                {'Delete': {'TableName': d.table('PENDIENTES'),
+                    'Key': d.encode(pending_key(paso)),
+                    **d.guard(pending, ['paso_id', 'monto_centavos', 'vence_en'])}},
+                d.put('FACTURAS', invoice),
+                d.put('OUTBOX', event_for(final, 'paso.facturado', payload, current))])
+            return 'FACTURADO'
+        except Exception as exc:
+            if not d.retryable(exc) or attempt == MAX_ATTEMPTS-1:
+                raise
+            d.backoff(attempt)
+    raise RuntimeError('INVOICE_RETRIES_EXHAUSTED')

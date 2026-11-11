@@ -1,0 +1,114 @@
+{
+  "Comment": "GuatePass: task token waits until original vence_en; timeout invoices atomically",
+  "StartAt": "RevisarPendiente",
+  "States": {
+    "RevisarPendiente": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${StartWaitArn}",
+        "Payload": {
+          "paso_id.$": "$.paso_id",
+          "check_only": true
+        }
+      },
+      "ResultSelector": {
+        "status.$": "$.Payload.status",
+        "seconds.$": "$.Payload.seconds"
+      },
+      "ResultPath": "$.revision",
+      "Next": "Decidir",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Decidir": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.revision.status",
+          "StringEquals": "TERMINADO",
+          "Next": "Terminado"
+        },
+        {
+          "Variable": "$.revision.status",
+          "StringEquals": "VENCIDO",
+          "Next": "Facturar"
+        }
+      ],
+      "Default": "EsperarRecarga"
+    },
+    "EsperarRecarga": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${RegisterTokenArn}",
+        "Payload": {
+          "paso_id.$": "$.paso_id",
+          "token.$": "$$.Task.Token",
+          "execution_arn.$": "$$.Execution.Id"
+        }
+      },
+      "TimeoutSecondsPath": "$.revision.seconds",
+      "ResultPath": "$.resultado",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
+          "ResultPath": "$.timeout",
+          "Next": "Facturar"
+        }
+      ],
+      "Next": "Terminado",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Facturar": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${VencerArn}",
+        "Payload": {
+          "paso_id.$": "$.paso_id"
+        }
+      },
+      "ResultPath": "$.facturacion",
+      "Next": "Terminado",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "Terminado": {
+      "Type": "Succeed"
+    }
+  }
+}

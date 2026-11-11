@@ -87,6 +87,8 @@ def cobrar_pendientes(placa: str, *, context=None) -> list[str]:
             retries += 1
             if retries >= money.MAX_ATTEMPTS:
                 raise RuntimeError('PENDING_RETRY_LIMIT')
+            # Dar tiempo a que termine la transacción del otro drenaje.
+            d.backoff(retries)
             continue
         retries = 0
         if status != 'COBRADO':
