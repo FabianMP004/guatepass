@@ -1056,11 +1056,16 @@ Resources:
         - RealtimeApi
         - ApiId
       Name: peajes
-      CodeHandlers: "import { util } from '@aws-appsync/utils';\nexport function onSubscribe(ctx) {\n  const c = ctx.identity.claims;\n\
-        \  const groups = c['cognito:groups'] || [];\n  const toll = c['custom:peaje_id'];\n  if (!groups.includes('operador')\
-        \ || !toll || c.token_use !== 'id') {\n    util.unauthorized();\n  }\n  // Exact channel: blocks wildcard and any\
-        \ other toll.\n  if (ctx.info.channel.path !== '/peajes/' + toll) {\n    util.unauthorized();\n  }\n}\nexport function\
-        \ onPublish(ctx) { return ctx.events; }\n"
+      CodeHandlers: "import { util } from '@aws-appsync/utils';\nexport function onSubscribe(ctx) {\n\
+        \  const claims = ctx.identity.claims;\n  const groups = claims['cognito:groups'] || [];\n  const\
+        \ toll = claims['custom:peaje_id'];\n  if (!groups.includes('operador') || !toll || claims.token_use\
+        \ !== 'id') {\n    util.unauthorized();\n  }\n  const suffix = 'p-' + toll.replaceAll('-', '-0').replaceAll('_',\
+        \ '-1');\n  if (ctx.info.channel.path !== '/peajes/' + suffix) {\n    util.unauthorized();\n \
+        \ }\n}\nexport function onPublish(ctx) { return ctx.events; }\n"
+      PublishAuthModes:
+      - AuthType: AWS_IAM
+      SubscribeAuthModes:
+      - AuthType: AMAZON_COGNITO_USER_POOLS
   WebhookApiKey:
     Type: AWS::ApiGateway::ApiKey
     Properties:
@@ -2833,6 +2838,269 @@ Resources:
               - BillingEnabled
               - true
               - false
+  HistorialLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-historial
+      RetentionInDays: 14
+  HistorialRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: HistorialRead
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-historial:*
+          - Effect: Allow
+            Action: dynamodb:Query
+            Resource:
+            - Fn::Sub: ${MovimientosTable.Arn}/index/PorPlaca
+            - Fn::Sub: ${FacturasTable.Arn}/index/PorPlaca
+            - Fn::Sub: ${PasosTable.Arn}/index/PorPlaca
+  HistorialFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: HistorialLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-historial
+      CodeUri: src/
+      Handler: usuarios.historial.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - HistorialRole
+        - Arn
+      Environment:
+        Variables:
+          CLIENT_ID:
+            Ref: UserPoolClient
+          ALLOWED_ORIGIN:
+            Fn::Sub: https://${PortalDistribution.DomainName}
+          MOVIMIENTOS_TABLE:
+            Ref: MovimientosTable
+          FACTURAS_TABLE:
+            Ref: FacturasTable
+          PASOS_TABLE:
+            Ref: PasosTable
+      Events:
+        Payments:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /history/payments/{placa}
+            Method: get
+        Invoices:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /history/invoices/{placa}
+            Method: get
+        OwnPasses:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: Api
+            Path: /users/{placa}/passes
+            Method: get
+  RealtimeDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-tiempo-real-dlq
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 1209600
+  RealtimeQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Fn::Sub: ${AWS::StackName}-tiempo-real
+      SqsManagedSseEnabled: true
+      MessageRetentionPeriod: 345600
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+          - RealtimeDLQ
+          - Arn
+        maxReceiveCount: 5
+  RealtimeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      EventPattern:
+        source:
+        - guatepass.pasos
+        detail-type:
+        - paso.registrado
+        - paso.cobrado
+        - paso.pendiente
+        - paso.no_registrado
+        - paso.no_identificado
+        - paso.facturado
+      State: ENABLED
+      Targets:
+      - Id: TiempoReal
+        Arn:
+          Fn::GetAtt:
+          - RealtimeQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  RealtimeLegacyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName:
+        Ref: EventBus
+      EventPattern:
+        source:
+        - guatepass
+        detail-type:
+        - PasoRegistrado
+        - CobroRealizado
+        - PasoPendiente
+        - PasoNoRegistrado
+        - PasoNoIdentificado
+        - FacturaEmitida
+      State: ENABLED
+      Targets:
+      - Id: TiempoReal
+        Arn:
+          Fn::GetAtt:
+          - RealtimeQueue
+          - Arn
+        DeadLetterConfig:
+          Arn:
+            Fn::GetAtt:
+            - RoutingDeliveryDLQ
+            - Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 10
+          MaximumEventAgeInSeconds: 3600
+  RealtimeQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: RealtimeQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: events.amazonaws.com
+          Action: sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - RealtimeQueue
+            - Arn
+          Condition:
+            ArnEquals:
+              aws:SourceArn:
+              - Fn::GetAtt:
+                - RealtimeRule
+                - Arn
+              - Fn::GetAtt:
+                - RealtimeLegacyRule
+                - Arn
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  TiempoRealLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-tiempo-real
+      RetentionInDays: 14
+  TiempoRealRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: TiempoRealPublish
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-tiempo-real:*
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - RealtimeQueue
+              - Arn
+          - Effect: Allow
+            Action: appsync:EventPublish
+            Resource:
+              Ref: PeajesNamespace
+  TiempoRealFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: TiempoRealLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-tiempo-real
+      CodeUri: src/
+      Handler: eventos.tiempo_real.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+        - TiempoRealRole
+        - Arn
+      Environment:
+        Variables:
+          REALTIME_HTTP_DOMAIN:
+            Fn::GetAtt:
+            - RealtimeApi
+            - Dns.Http
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - RealtimeQueue
+              - Arn
+            BatchSize: 5
+            FunctionResponseTypes:
+            - ReportBatchItemFailures
 Outputs:
   UsuariosTableName:
     Value:
@@ -3065,6 +3333,18 @@ Outputs:
   ReconcileWaitFunctionName:
     Value:
       Ref: ReconcileWaitFunction
+  RealtimeQueueUrl:
+    Value:
+      Ref: RealtimeQueue
+  RealtimeDLQUrl:
+    Value:
+      Ref: RealtimeDLQ
+  TiempoRealFunctionName:
+    Value:
+      Ref: TiempoRealFunction
+  HistorialFunctionName:
+    Value:
+      Ref: HistorialFunction
 Conditions:
   BillingEnabled:
     Fn::Equals:

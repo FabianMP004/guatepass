@@ -157,7 +157,7 @@ def event_for(paso, kind, payload, when):
 
 
 def payload_for(paso):
-    return {k: paso[k] for k in ('paso_id', 'placa', 'peaje_id', 'modalidad', 'monto_centavos')}
+    return {k: paso[k] for k in ('paso_id', 'placa', 'peaje_id', 'modalidad', 'monto_centavos', 'fecha_local') if k in paso}
 
 
 def pending_key(paso):
