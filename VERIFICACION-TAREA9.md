@@ -9,4 +9,5 @@
 
 Estado de ejecución SUCCEEDED no demuestra por sí mismo el estado financiero. La prueba de API con token Cognito real de tarea 8 aún requiere seguimiento.
 - [x] La prueba AWS confirmó COBRADO sin factura y FACTURADO Q29.50 con NIT, saldo sin cargo y sin movimiento COBRO.
-- [ ] Confirmar el evento de factura en Outbox y revisar ambos Graph view.
+- [x] Outbox confirmado: evento_5f079bf64a9ed5f4ec04b646ee3e0af7732fb731232a55bc37f77edff4879eca; factura Q29.50 y publicado=True.
+- [ ] Revisar visualmente ambos Graph view.
