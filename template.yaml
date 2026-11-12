@@ -30,6 +30,24 @@ Parameters:
     - 'false'
     - 'true'
     Description: Enable only after reviewing queued passes and assigning driver carnets.
+  RegistryApiUrl:
+    Type: String
+    Default: ''
+    Description: URL HTTPS del registro externo
+
+  RegistrySecretArn:
+    Type: String
+    Default: ''
+    Description: ARN del secreto del registro externo
+
+  RegistryConsumerEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'false'
+      - 'true'
+    Description: Habilita el consumidor de RegistroQueue
+
 Resources:
   UsuariosTable:
     Type: AWS::DynamoDB::Table
@@ -1759,6 +1777,153 @@ Resources:
             MaximumBatchingWindowInSeconds: 0
             FunctionResponseTypes:
             - ReportBatchItemFailures
+  RegistryConsumerLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-registro-consumer
+      RetentionInDays: 14
+
+  RegistryConsumerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RegistryConsumerPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-registro-consumer:*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  Fn::GetAtt:
+                    - PasosTable
+                    - Arn
+
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource:
+                  - Fn::GetAtt:
+                    - PasosTable
+                    - Arn
+                  - Fn::GetAtt:
+                    - FacturasTable
+                    - Arn
+                  - Fn::GetAtt:
+                    - OutboxTable
+                    - Arn
+
+              - Effect: Allow
+                Action:
+                  - dynamodb:TransactWriteItems
+                Resource:
+                  - Fn::GetAtt:
+                      - PasosTable
+                      - Arn
+                  - Fn::GetAtt:
+                      - FacturasTable
+                      - Arn
+                  - Fn::GetAtt:
+                      - OutboxTable
+                      - Arn
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  Fn::GetAtt:
+                    - RegistroQueue
+                    - Arn
+              - Fn::If:
+                  - RegistryConfigured
+                  - Effect: Allow
+                    Action:
+                      - secretsmanager:GetSecretValue
+                    Resource:
+                      Ref: RegistrySecretArn
+                  - Ref: AWS::NoValue
+
+  RegistryConsumerFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: RegistryConsumerLogs
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-registro-consumer
+      CodeUri: src/
+      Handler: integraciones.registro.handler
+      Runtime: python3.12
+      Timeout: 15
+      MemorySize: 256
+      Role:
+        Fn::GetAtt:
+          - RegistryConsumerRole
+          - Arn
+      Environment:
+        Variables:
+          REGISTRY_API_URL:
+            Ref: RegistryApiUrl
+          REGISTRY_SECRET_ARN:
+            Ref: RegistrySecretArn
+          REGISTRY_TIMEOUT_SECONDS: '3'
+          OWNER_CARNET:
+            Ref: OwnerCarnet
+          PASOS_TABLE:
+            Ref: PasosTable
+          FACTURAS_TABLE:
+            Ref: FacturasTable
+          OUTBOX_TABLE:
+            Ref: OutboxTable
+      Events:
+        Messages:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+                - RegistroQueue
+                - Arn
+            Enabled:
+              Fn::If:
+                - RegistryConfigured
+                - true
+                - false
+            BatchSize: 5
+            MaximumBatchingWindowInSeconds: 0
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  RegistryConsumerAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: RegistryConfigured
+    Properties:
+      AlarmDescription: Errores del consumidor del registro externo
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: RegistryConsumerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
   TagsLogs:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -3234,6 +3399,15 @@ Outputs:
       Fn::GetAtt:
       - RegistroDLQ
       - Arn
+  RegistryConsumerFunctionName:
+    Value:
+      Ref: RegistryConsumerFunction
+
+  RegistryConsumerAlarmName:
+    Condition: RegistryConfigured
+    Value:
+      Ref: RegistryConsumerAlarm
+
   NotificacionesQueueUrl:
     Value:
       Ref: NotificacionesQueue
@@ -3346,6 +3520,20 @@ Outputs:
     Value:
       Ref: HistorialFunction
 Conditions:
+  RegistryConfigured:
+    Fn::And:
+      - Fn::Equals:
+          - Ref: RegistryConsumerEnabled
+          - 'true'
+      - Fn::Not:
+          - Fn::Equals:
+              - Ref: RegistryApiUrl
+              - ''
+      - Fn::Not:
+          - Fn::Equals:
+              - Ref: RegistrySecretArn
+              - ''
+
   BillingEnabled:
     Fn::Equals:
     - Ref: BillingConsumerEnabled

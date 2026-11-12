@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Registro externo aislado de GuatePass
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - demo
+      - prod
+
+Resources:
+  RegistroTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: placa
+          AttributeType: S
+      KeySchema:
+        - AttributeName: placa
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: GuatePass
+        - Key: Component
+          Value: RegistroExterno
+        - Key: Environment
+          Value: !Ref Environment
+
+  RegistroSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Credenciales del API HTTPS del registro externo
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"guatepass-registro"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/'
+      Tags:
+        - Key: Project
+          Value: GuatePass
+        - Key: Component
+          Value: RegistroExterno
+
+  RegistroAvailabilityParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /guatepass/${Environment}/registro/disponibilidad
+      Type: String
+      Value: 'on'
+      Description: Disponibilidad simulada del registro externo; valores on u off
+      Tags:
+        Project: GuatePass
+        Component: RegistroExterno
+
+  RegistroApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      StageName: Prod
+      EndpointConfiguration: REGIONAL
+
+  RegistroLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-registro
+      RetentionInDays: 14
+
+  RegistroRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RegistroPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-registro:*
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt RegistroTable.Arn
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref RegistroSecret
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/guatepass/${Environment}/registro/disponibilidad
+
+  RegistroFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: RegistroLogs
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-registro
+      CodeUri: src/
+      Handler: registro.handler
+      Runtime: python3.12
+      Timeout: 10
+      MemorySize: 256
+      Role: !GetAtt RegistroRole.Arn
+      Environment:
+        Variables:
+          REGISTRY_TABLE: !Ref RegistroTable
+          REGISTRY_SECRET_ARN: !Ref RegistroSecret
+          REGISTRY_AVAILABILITY_PARAMETER: !Ref RegistroAvailabilityParameter
+      Events:
+        GetRegistry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref RegistroApi
+            Path: /registro/{placa}
+            Method: get
+
+Outputs:
+  RegistroApiUrl:
+    Description: URL HTTPS del API del registro externo
+    Value: !Sub https://${RegistroApi}.execute-api.${AWS::Region}.amazonaws.com/Prod
+
+  RegistryApiUrl:
+    Description: Alias en inglés de la URL del API
+    Value: !Sub https://${RegistroApi}.execute-api.${AWS::Region}.amazonaws.com/Prod
+
+  RegistroTableName:
+    Value: !Ref RegistroTable
+
+  RegistryTableName:
+    Value: !Ref RegistroTable
+
+  RegistroSecretArn:
+    Description: ARN del secreto; nunca contiene el valor de la contraseña
+    Value: !Ref RegistroSecret
+
+  RegistrySecretArn:
+    Value: !Ref RegistroSecret
+
+  RegistroAvailabilityParameterName:
+    Value: !Ref RegistroAvailabilityParameter
+
+  RegistryAvailabilityParameterName:
+    Value: !Ref RegistroAvailabilityParameter
+

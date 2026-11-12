@@ -255,3 +255,9 @@ secrets/
 credentials/
 demo-passwords*
 *.pem
+
+
+# Artefactos locales de SAM y Python
+.aws-sam-registro/
+.venv-sam312/
+build.toml
