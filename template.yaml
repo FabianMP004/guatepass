@@ -3430,6 +3430,100 @@ Resources:
         DisputeTokenArn: !GetAtt DisputeTokenFunction.Arn
         DisputeTimeoutArn: !GetAtt DisputeTimeoutFunction.Arn
       Role: !GetAtt EsperaDisputaRole.Arn
+  RevenueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: RevenuePermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-revenue:*
+          - Effect: Allow
+            Action: [dynamodb:Scan]
+            Resource: [!GetAtt PeajesTable.Arn, !GetAtt MovimientosTable.Arn, !GetAtt FacturasTable.Arn]
+          - Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:TransactWriteItems]
+            Resource: [!GetAtt RecaudacionTable.Arn, !GetAtt OutboxTable.Arn]
+  RevenueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-revenue
+      CodeUri: src/
+      Handler: reportes.recaudacion.handler
+      Runtime: python3.12
+      Timeout: 180
+      MemorySize: 512
+      Role: !GetAtt RevenueRole.Arn
+      Environment:
+        Variables:
+          CLIENT_ID: !Ref UserPoolClient
+          ALLOWED_ORIGIN: !Sub https://${PortalDistribution.DomainName}
+          OWNER_CARNET: !Ref OwnerCarnet
+          PEAJES_TABLE: !Ref PeajesTable
+          MOVIMIENTOS_TABLE: !Ref MovimientosTable
+          FACTURAS_TABLE: !Ref FacturasTable
+          RECAUDACION_TABLE: !Ref RecaudacionTable
+          OUTBOX_TABLE: !Ref OutboxTable
+      Events:
+        GetTolls:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /tolls
+            Method: get
+        GetRevenue:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /revenue
+            Method: get
+        GetRevenueByDate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /revenue/{fecha}
+            Method: get
+  RevenueScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: scheduler.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: InvokeRevenue
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !GetAtt RevenueFunction.Arn
+  RevenueSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub ${AWS::StackName}-daily-revenue
+      ScheduleExpression: cron(0 6 * * ? *)
+      ScheduleExpressionTimezone: America/Guatemala
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      State: ENABLED
+      Target:
+        Arn: !GetAtt RevenueFunction.Arn
+        RoleArn: !GetAtt RevenueScheduleRole.Arn
+        Input: '{}'
 Outputs:
   UsuariosTableName:
     Value:
@@ -3463,6 +3557,10 @@ Outputs:
   RecaudacionTableName:
     Value:
       Ref: RecaudacionTable
+  RevenueFunctionName:
+    Value: !Ref RevenueFunction
+  RevenueScheduleArn:
+    Value: !GetAtt RevenueSchedule.Arn
   OutboxTableName:
     Value:
       Ref: OutboxTable
