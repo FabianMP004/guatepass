@@ -3266,6 +3266,170 @@ Resources:
             BatchSize: 5
             FunctionResponseTypes:
             - ReportBatchItemFailures
+  DisputeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: DisputePermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-disputa*:*
+          - Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Scan, dynamodb:Query, dynamodb:TransactWriteItems]
+            Resource:
+            - !GetAtt UsuariosTable.Arn
+            - !GetAtt MovimientosTable.Arn
+            - !GetAtt DisputasTable.Arn
+            - !GetAtt EsperasTable.Arn
+            - !GetAtt OutboxTable.Arn
+            - !Sub ${DisputasTable.Arn}/index/PorPlaca
+            - !Sub ${DisputasTable.Arn}/index/PorEstado
+          - Effect: Allow
+            Action: ssm:GetParameter
+            Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/guatepass/${Environment}/disputa/timeout-seconds
+          - Effect: Allow
+            Action: states:StartExecution
+            Resource: !Sub arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-espera-disputa
+          - Effect: Allow
+            Action: states:DescribeExecution
+            Resource: !Sub arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-espera-disputa:*
+          - Effect: Allow
+            Action: states:SendTaskSuccess
+            Resource: '*'
+  DisputeApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-disputa-api
+      CodeUri: src/
+      Handler: disputas.api.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt DisputeRole.Arn
+      Environment:
+        Variables:
+          CLIENT_ID: !Ref UserPoolClient
+          ALLOWED_ORIGIN: !Sub https://${PortalDistribution.DomainName}
+          DISPUTAS_TABLE: !Ref DisputasTable
+          MOVIMIENTOS_TABLE: !Ref MovimientosTable
+          USUARIOS_TABLE: !Ref UsuariosTable
+          OUTBOX_TABLE: !Ref OutboxTable
+          ESPERAS_TABLE: !Ref EsperasTable
+          DISPUTA_TIMEOUT_PARAMETER: !Ref DisputaTimeoutParameter
+          DISPUTA_STATE_MACHINE_ARN: !Ref EsperaDisputa
+          OWNER_CARNET: !Ref OwnerCarnet
+      Events:
+        Open:
+          Type: Api
+          Properties: {RestApiId: !Ref Api, Path: /disputes, Method: post}
+        List:
+          Type: Api
+          Properties: {RestApiId: !Ref Api, Path: /disputes, Method: get}
+        Resolve:
+          Type: Api
+          Properties: {RestApiId: !Ref Api, Path: '/disputes/{id}/resolve', Method: post}
+  DisputeCheckFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-disputa-check
+      CodeUri: src/
+      Handler: disputas.resolver.check_handler
+      Runtime: python3.12
+      Timeout: 30
+      Role: !GetAtt DisputeRole.Arn
+      Environment:
+        Variables: {DISPUTAS_TABLE: !Ref DisputasTable}
+  DisputeTokenFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-disputa-token
+      CodeUri: src/
+      Handler: disputas.resolver.registrar_token
+      Runtime: python3.12
+      Timeout: 30
+      Role: !GetAtt DisputeRole.Arn
+      Environment:
+        Variables: {DISPUTAS_TABLE: !Ref DisputasTable, ESPERAS_TABLE: !Ref EsperasTable}
+  DisputeTimeoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-disputa-timeout
+      CodeUri: src/
+      Handler: disputas.resolver.timeout_handler
+      Runtime: python3.12
+      Timeout: 30
+      Role: !GetAtt DisputeRole.Arn
+      Environment:
+        Variables:
+          DISPUTAS_TABLE: !Ref DisputasTable
+          USUARIOS_TABLE: !Ref UsuariosTable
+          MOVIMIENTOS_TABLE: !Ref MovimientosTable
+          OUTBOX_TABLE: !Ref OutboxTable
+          ESPERAS_TABLE: !Ref EsperasTable
+          OWNER_CARNET: !Ref OwnerCarnet
+  DisputeReconcileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-disputa-reconcile
+      CodeUri: src/
+      Handler: disputas.resolver.reconcile_handler
+      Runtime: python3.12
+      Timeout: 120
+      Role: !GetAtt DisputeRole.Arn
+      Environment:
+        Variables:
+          DISPUTAS_TABLE: !Ref DisputasTable
+          USUARIOS_TABLE: !Ref UsuariosTable
+          MOVIMIENTOS_TABLE: !Ref MovimientosTable
+          OUTBOX_TABLE: !Ref OutboxTable
+          ESPERAS_TABLE: !Ref EsperasTable
+          OWNER_CARNET: !Ref OwnerCarnet
+          DISPUTA_STATE_MACHINE_ARN: !Ref EsperaDisputa
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled: true
+  EsperaDisputaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: states.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: InvokeDisputeTasks
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: [!GetAtt DisputeCheckFunction.Arn, !GetAtt DisputeTokenFunction.Arn, !GetAtt DisputeTimeoutFunction.Arn]
+  EsperaDisputa:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub ${AWS::StackName}-espera-disputa
+      Type: STANDARD
+      DefinitionUri: statemachines/espera_disputa.asl.json
+      DefinitionSubstitutions:
+        DisputeCheckArn: !GetAtt DisputeCheckFunction.Arn
+        DisputeTokenArn: !GetAtt DisputeTokenFunction.Arn
+        DisputeTimeoutArn: !GetAtt DisputeTimeoutFunction.Arn
+      Role: !GetAtt EsperaDisputaRole.Arn
 Outputs:
   UsuariosTableName:
     Value:
@@ -3291,6 +3455,8 @@ Outputs:
   DisputasTableName:
     Value:
       Ref: DisputasTable
+  EsperaDisputaArn:
+    Value: !Ref EsperaDisputa
   NotificacionesTableName:
     Value:
       Ref: NotificacionesTable

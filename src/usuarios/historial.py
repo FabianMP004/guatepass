@@ -57,10 +57,12 @@ def handler(event,context):
         items=[]
         for row in page.get('Items',[]):
             if scope=='payments':
-                if row.get('tipo')!='COBRO':continue
-                items.append({'cobro_id':row['cobro_id'],'paso_id':row['paso_id'],
+                if row.get('tipo') not in ('COBRO', 'DEVOLUCION'):continue
+                items.append({'tipo':row['tipo'], 'cobro_id':row['cobro_id'],
+                    'devolucion_id':row.get('devolucion_id'), 'paso_id':row.get('paso_id'),
                     'peaje_id':row['peaje_id'],'monto':money(row['monto_centavos']),
-                    'moneda':'GTQ','creado_en':row['fecha'],'devuelto':False})
+                    'moneda':'GTQ','creado_en':row['fecha'],
+                    'devuelto':row['tipo']=='DEVOLUCION'})
             elif scope=='invoices':
                 items.append({'factura_id':row['factura_id'],'paso_id':row['paso_id'],
                     'numero':row['numero'],'fecha':row['fecha'],

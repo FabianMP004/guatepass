@@ -1,0 +1,37 @@
+{
+  "Comment": "A durable decision is applied before closing the callback wait.",
+  "StartAt": "Consultar",
+  "States": {
+    "Consultar": {
+      "Type": "Task", "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {"FunctionName": "${DisputeCheckArn}", "Payload": {"disputa_id.$": "$.disputa_id"}},
+      "ResultSelector": {"status.$": "$.Payload.status", "seconds.$": "$.Payload.seconds"},
+      "ResultPath": "$.revision", "Next": "Estado",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}]
+    },
+    "Estado": {
+      "Type": "Choice",
+      "Choices": [
+        {"Variable": "$.revision.status", "StringEquals": "TERMINADA", "Next": "Fin"},
+        {"Variable": "$.revision.status", "StringEquals": "VENCIDA", "Next": "Vencer"}
+      ], "Default": "Esperar"
+    },
+    "Esperar": {
+      "Type": "Task", "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {"FunctionName": "${DisputeTokenArn}", "Payload": {
+        "disputa_id.$": "$.disputa_id", "token.$": "$$.Task.Token", "execution_arn.$": "$$.Execution.Id"
+      }},
+      "TimeoutSecondsPath": "$.revision.seconds", "ResultPath": "$.resultado",
+      "Catch": [{"ErrorEquals": ["States.Timeout"], "ResultPath": "$.timeout", "Next": "Vencer"}],
+      "Next": "Fin",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}]
+    },
+    "Vencer": {
+      "Type": "Task", "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {"FunctionName": "${DisputeTimeoutArn}", "Payload": {"disputa_id.$": "$.disputa_id"}},
+      "ResultPath": "$.resolucion", "Next": "Fin",
+      "Retry": [{"ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}]
+    },
+    "Fin": {"Type": "Succeed"}
+  }
+}
