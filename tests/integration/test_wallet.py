@@ -93,6 +93,47 @@ def test_two_steps_diego_five_quetzales(wallet):
     assert get(wallet, 'USUARIOS', placa='P-444STU')['version'] == 2
 
 
+def test_refund_event_pays_pending_and_preserves_refund_movement(wallet, monkeypatch):
+    from common.events import from_outbox
+    from common.models import stable_id
+    from disputas.abrir import abrir_disputa
+    from disputas.resolver import decidir_disputa
+
+    db = boto3.resource('dynamodb')
+    for name, keys in {'DISPUTAS': ['cobro_id'], 'ESPERAS': ['espera_id']}.items():
+        monkeypatch.setenv(name + '_TABLE', name.lower())
+        wallet[name] = db.create_table(
+            TableName=name.lower(), BillingMode='PAY_PER_REQUEST',
+            AttributeDefinitions=[{'AttributeName': key, 'AttributeType': 'S'} for key in keys],
+            KeySchema=[{'AttributeName': key, 'KeyType': 'HASH'} for key in keys])
+    monkeypatch.setenv('DISPUTA_TIMEOUT_PARAMETER', '/test/timeout')
+
+    put_pass(wallet, 'pago-original')
+    put_pass(wallet, 'paso-pendiente')
+    assert cobrar_paso('pago-original') == 'COBRADO'
+    assert cobrar_paso('paso-pendiente') == 'PENDIENTE'
+    assert get(wallet, 'USUARIOS', placa='P-444STU')['saldo_centavos'] == 0
+
+    cobro_id = stable_id('cobro', 'pago-original')
+    dispute = abrir_disputa(cobro_id, 'Cobro incorrecto',
+        {'placa': 'P-444STU', 'sub': 'sub-P-444STU'})
+    result = decidir_disputa(dispute['disputa_id'], 'APROBAR', 'Cobro duplicado',
+        {'role': 'atencion', 'sub': 'agente', 'carnet': '20230223'})
+    refund_id = result['devolucion_id']
+    refund_before = get(wallet, 'MOVIMIENTOS', movimiento_id=refund_id)
+    assert refund_before['tipo'] == 'DEVOLUCION'
+    assert get(wallet, 'USUARIOS', placa='P-444STU')['saldo_centavos'] == 500
+
+    refund_event = next(from_outbox(item) for item in wallet['OUTBOX'].scan()['Items']
+                        if item['detail-type'] == 'saldo.devuelto')
+    assert handler({'Records': [{'body': json.dumps(refund_event),
+        'messageId': 'refund-event'}]}, None) == {'batchItemFailures': []}
+    assert get(wallet, 'PASOS', paso_id='paso-pendiente')['estado'] == 'COBRADO'
+    assert get(wallet, 'USUARIOS', placa='P-444STU')['saldo_centavos'] == 0
+    assert get(wallet, 'MOVIMIENTOS', movimiento_id=refund_id) == refund_before
+    assert count(wallet, 'MOVIMIENTOS') == 3
+
+
 def test_concurrent_distinct_steps(wallet):
     put_pass(wallet, 'p1'); put_pass(wallet, 'p2')
     with ThreadPoolExecutor(max_workers=2) as pool:
