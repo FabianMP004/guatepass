@@ -7,6 +7,7 @@ import boto3
 from botocore.config import Config
 from common.models import validate_event
 from common.events import from_outbox
+from common.observability import emit
 
 def publicar(eventos: list[dict]) -> list[str]:
     for event in eventos:
@@ -62,6 +63,8 @@ def publish_ids(ids):
     for event in pending:
         identifier = event['detail']['evento_id']
         if identifier in rejected:
+            emit(paso_id=event['detail'].get('paso_id'), evento_id=identifier,
+                 request_id=event['detail'].get('request_id'), error='PUBLICATION_FAILED')
             failed.append(identifier)
             continue
         try:
@@ -69,7 +72,11 @@ def publish_ids(ids):
                 UpdateExpression='SET enviado=:yes, enviado_en=:now REMOVE pendiente_shard',
                 ConditionExpression='attribute_exists(evento_id)',
                 ExpressionAttributeValues={':yes': True, ':now': datetime.now(timezone.utc).isoformat()})
+            emit(paso_id=event['detail'].get('paso_id'), evento_id=identifier,
+                 request_id=event['detail'].get('request_id'), estado='PUBLICADO')
         except Exception:
+            emit(paso_id=event['detail'].get('paso_id'), evento_id=identifier,
+                 request_id=event['detail'].get('request_id'), error='OUTBOX_MARK_FAILED')
             logging.exception('Accepted event not marked id=%s', identifier)
             failed.append(identifier)
     return failed

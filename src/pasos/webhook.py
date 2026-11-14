@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from boto3.dynamodb.types import TypeSerializer
 from common.models import paso_id, make_event, utc_timestamp
 from common.events import outbox_item
+from common.observability import emit
 from common.http import response
 
 _ddb = None
@@ -55,6 +56,7 @@ def _register(aviso, request_id):
     db = database()
     key = encode({'paso_id': identifier})
     if db.get_item(TableName=os.environ['PASOS_TABLE'], Key=key, ConsistentRead=True).get('Item'):
+        emit(paso_id=identifier, request_id=request_id, estado='DUPLICADO')
         return {'paso_id': identifier}
     received = datetime.now(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
     local_date = datetime.fromisoformat(value['timestamp'].replace('Z', '+00:00')).astimezone(ZoneInfo('America/Guatemala')).date().isoformat()
@@ -78,11 +80,14 @@ def _register(aviso, request_id):
         if exc.response['Error']['Code'] != 'TransactionCanceledException':
             raise
         if db.get_item(TableName=os.environ['PASOS_TABLE'], Key=key, ConsistentRead=True).get('Item'):
+            emit(paso_id=identifier, request_id=request_id, estado='DUPLICADO')
             return {'paso_id': identifier}
         reasons = exc.response.get('CancellationReasons', [])
         if reasons and reasons[0].get('Code') == 'ConditionalCheckFailed':
             raise TollNotFound('TOLL_NOT_FOUND') from exc
         raise
+    emit(paso_id=identifier, evento_id=event['detail']['evento_id'],
+         request_id=request_id, estado='REGISTRADO')
     return {'paso_id': identifier}
 
 def handler(event, context):
@@ -93,9 +98,12 @@ def handler(event, context):
         result = _register(json.loads(body), event.get('requestContext', {}).get('requestId') or str(uuid4()))
         return response(event, 202, result, message='Paso recibido.')
     except (ValueError, TypeError, UnicodeError):
+        emit(request_id=event.get('requestContext', {}).get('requestId'), error='VALIDATION_ERROR')
         return response(event, 400, message='Aviso inválido.', code='VALIDATION_ERROR')
     except TollNotFound:
+        emit(request_id=event.get('requestContext', {}).get('requestId'), error='TOLL_NOT_FOUND')
         return response(event, 404, message='Peaje inexistente.', code='TOLL_NOT_FOUND')
     except Exception:
+        emit(request_id=event.get('requestContext', {}).get('requestId'), error='PERSISTENCE_ERROR')
         logging.exception('webhook persistence failed')
         return response(event, 503, message='Reintente el mismo aviso.', code='TEMPORARILY_UNAVAILABLE')

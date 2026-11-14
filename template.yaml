@@ -636,6 +636,7 @@ Resources:
   Api:
     Type: AWS::Serverless::Api
     Properties:
+      Name: !Sub ${AWS::StackName}-api
       StageName:
         Ref: Environment
       EndpointConfiguration: REGIONAL
@@ -3524,6 +3525,121 @@ Resources:
         Arn: !GetAtt RevenueFunction.Arn
         RoleArn: !GetAtt RevenueScheduleRole.Arn
         Input: '{}'
+  PasosBacklogAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-pasos-backlog
+      AlarmDescription: Acumulación de al menos 10 avisos pendientes durante un minuto.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+      - Name: QueueName
+        Value: !Sub ${AWS::StackName}-cola-pasos
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  OutboxPublishFailureFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref OutboxPublisherLogs
+      FilterPattern: PUBLICATION_FAILED
+      MetricTransformations:
+      - MetricNamespace: GuatePass/Observability
+        MetricName: PublishFailures
+        MetricValue: '1'
+  PasosDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-pasos-dlq
+      AlarmDescription: La DLQ de pasos tiene al menos un mensaje.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+      - Name: QueueName
+        Value: !Sub ${AWS::StackName}-cola-pasos-dlq
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  OutboxLagAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-outbox-lag
+      AlarmDescription: Evento Outbox pendiente por más de 5 minutos.
+      Namespace: GuatePass/Observability
+      MetricName: OutboxOldestSeconds
+      Dimensions:
+      - Name: Stack
+        Value: !Ref AWS::StackName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 300
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+  ObservabilityRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: {Service: lambda.amazonaws.com}
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: ObserveOutbox
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-observe-outbox:*
+          - Effect: Allow
+            Action: dynamodb:Query
+            Resource: !Sub ${OutboxTable.Arn}/index/PorPendiente
+          - Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: GuatePass/Observability
+  OutboxLagFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-observe-outbox
+      CodeUri: src/
+      Handler: observabilidad.metricas.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt ObservabilityRole.Arn
+      Environment:
+        Variables:
+          OUTBOX_TABLE: !Ref OutboxTable
+          STACK_NAME: !Ref AWS::StackName
+      Events:
+        EveryMinute:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+            Enabled: true
+  ObservabilityDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}-observability
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"API latencia y errores","region":"${AWS::Region}","metrics":[["AWS/ApiGateway","Latency","ApiName","${AWS::StackName}-api",{"stat":"p99"}],["AWS/ApiGateway","4XXError","ApiName","${AWS::StackName}-api",{"stat":"Sum"}],["AWS/ApiGateway","5XXError","ApiName","${AWS::StackName}-api",{"stat":"Sum"}]]}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Lambda errores y throttles","region":"${AWS::Region}","metrics":[["AWS/Lambda","Errors","FunctionName","${AWS::StackName}-webhook",{"stat":"Sum"}],["AWS/Lambda","Throttles","FunctionName","${AWS::StackName}-webhook",{"stat":"Sum"}],["AWS/Lambda","Errors","FunctionName","${AWS::StackName}-cobrar",{"stat":"Sum"}],["AWS/Lambda","Errors","FunctionName","${AWS::StackName}-disputa-timeout",{"stat":"Sum"}]]}},
+          {"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"SQS profundidad, edad y DLQ","region":"${AWS::Region}","metrics":[["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${AWS::StackName}-cola-pasos",{"stat":"Maximum"}],["AWS/SQS","ApproximateAgeOfOldestMessage","QueueName","${AWS::StackName}-cola-pasos",{"stat":"Maximum"}],["AWS/SQS","ApproximateNumberOfMessagesVisible","QueueName","${AWS::StackName}-cola-pasos-dlq",{"stat":"Maximum"}]]}},
+          {"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"Outbox pendiente y fallas","region":"${AWS::Region}","metrics":[["GuatePass/Observability","OutboxPendingCount","Stack","${AWS::StackName}",{"stat":"Maximum"}],["GuatePass/Observability","OutboxOldestSeconds","Stack","${AWS::StackName}",{"stat":"Maximum"}],["GuatePass/Observability","PublishFailures",{"stat":"Sum"}],["AWS/Lambda","Errors","FunctionName","${AWS::StackName}-outboxpublisher",{"stat":"Sum"}]]}},
+          {"type":"metric","x":0,"y":12,"width":12,"height":6,"properties":{"title":"Ejecuciones de espera fallidas","region":"${AWS::Region}","metrics":[["AWS/States","ExecutionsFailed","StateMachineArn","${EsperaDisputa}",{"stat":"Sum"}],["AWS/States","ExecutionsFailed","StateMachineArn","${EsperaRecarga}",{"stat":"Sum"}]]}}
+        ]}
 Outputs:
   UsuariosTableName:
     Value:
@@ -3561,6 +3677,16 @@ Outputs:
     Value: !Ref RevenueFunction
   RevenueScheduleArn:
     Value: !GetAtt RevenueSchedule.Arn
+  PasosBacklogAlarmName:
+    Value: !Ref PasosBacklogAlarm
+  PasosDLQAlarmName:
+    Value: !Ref PasosDLQAlarm
+  OutboxLagAlarmName:
+    Value: !Ref OutboxLagAlarm
+  ObservabilityDashboardName:
+    Value: !Ref ObservabilityDashboard
+  RestApiId:
+    Value: !Ref Api
   OutboxTableName:
     Value:
       Ref: OutboxTable
