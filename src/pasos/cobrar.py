@@ -6,6 +6,7 @@ from common import dynamo as d
 from common.models import validate_event
 from common.catalogo import LEGACY
 from pasos.pendientes import cobrar_pendientes
+from common.observability import emit
 
 
 def cobrar_paso(paso_id: str) -> str:
@@ -15,6 +16,7 @@ def cobrar_paso(paso_id: str) -> str:
 def handler(event, context):
     failed = []
     for record in event['Records']:
+        message = None
         try:
             if context and context.get_remaining_time_in_millis() < 5000:
                 raise RuntimeError('BATCH_TIME_BUDGET')
@@ -32,13 +34,25 @@ def handler(event, context):
             kind = LEGACY.get(message['detail-type'], message['detail-type'])
             detail = message['detail']
             if kind == 'paso.registrado':
-                cobrar_paso(detail['paso_id'])
+                state = cobrar_paso(detail['paso_id'])
+                emit(paso_id=detail['paso_id'], evento_id=detail.get('evento_id'),
+                     request_id=detail.get('request_id'), estado=state)
             elif kind in ('paso.pendiente', 'saldo.recargado', 'saldo.devuelto'):
                 cobrar_pendientes(detail['placa'], context=context)
+                emit(paso_id=detail.get('paso_id'), evento_id=detail.get('evento_id'),
+                     request_id=detail.get('request_id'), estado='DRENAJE_COMPLETO')
             else:
                 raise ValueError('UNSUPPORTED_WALLET_EVENT')
         except Exception as exc:
-            logging.error('billing failed message_id=%s error_type=%s',
-                          record['messageId'], type(exc).__name__)
+            detail = message.get('detail') if isinstance(message, dict) else None
+            detail = detail if isinstance(detail, dict) else {}
+            response = getattr(exc, 'response', {})
+            code = response.get('Error', {}).get('Code') or type(exc).__name__
+            reasons = [reason.get('Code') for reason in response.get('CancellationReasons', [])
+                       if reason.get('Code') not in (None, 'None')]
+            emit(paso_id=detail.get('paso_id'), evento_id=detail.get('evento_id'),
+                 request_id=detail.get('request_id'), error=code)
+            logging.error('billing failed message_id=%s error_code=%s cancellation_codes=%s',
+                          record['messageId'], code, reasons[:5])
             failed.append({'itemIdentifier': record['messageId']})
     return {'batchItemFailures': failed}

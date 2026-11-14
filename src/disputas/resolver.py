@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import boto3
 from common import dynamo as d
 from disputas.devolucion import _load, aplicar_devolucion
+from common.observability import emit
 
 
 def _now():
@@ -31,6 +32,8 @@ def _decide(disputa_id, decision, reason, actor, automatic=False):
             if automatic or (row['decision'] == decision and row.get('resuelta_por') == actor['sub']):
                 result = aplicar_devolucion(disputa_id)
                 completar(disputa_id)
+                emit(paso_id=row.get('paso_id'), request_id='disputa:' + disputa_id,
+                     estado=result['estado'])
                 return result
             raise ValueError('DISPUTE_ALREADY_RESOLVED')
         if not automatic and _now() >= _due(row):
@@ -52,6 +55,8 @@ def _decide(disputa_id, decision, reason, actor, automatic=False):
             continue
         result = aplicar_devolucion(disputa_id)
         completar(disputa_id)
+        emit(paso_id=row.get('paso_id'), request_id='disputa:' + disputa_id,
+             estado=result['estado'])
         return result
     raise RuntimeError('DECISION_RETRY_EXHAUSTED')
 

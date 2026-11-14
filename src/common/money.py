@@ -246,7 +246,7 @@ def transition(db, paso):
 
     final = dict(paso, version=paso['version'] + 1)
     values = {':version': user['version'], ':next': user['version'] + 1,
-              ':sub': user['sub'], ':amount': amount}
+              ':sub': user['sub']}
     update = {'TableName': d.table('USUARIOS'), 'Key': d.encode({'placa': paso['placa']}),
         'ExpressionAttributeNames': {'#v': 'version', '#s': 'sub', '#b': 'saldo_centavos'},
         'ConditionExpression': '#v = :version AND #s = :sub',
@@ -254,6 +254,7 @@ def transition(db, paso):
     items = []
     if balance >= amount and older is None:
         result = 'COBRADO'
+        values[':amount'] = amount
         identifier = stable_id('cobro', paso['paso_id'])
         final.update(estado=result, cobro_id=identifier, cobrado_en=timestamp(when))
         update['ConditionExpression'] += ' AND #b >= :amount'
@@ -278,6 +279,7 @@ def transition(db, paso):
         due = deadline(boto3.client('ssm'), os.environ['RECARGA_TIMEOUT_PARAMETER'], when)
         final.update(estado=result, vence_en=due)
         if older is None:
+            values[':amount'] = amount
             update['ConditionExpression'] += ' AND #b < :amount'
         else:
             items.append(d.check('PENDIENTES',
