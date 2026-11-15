@@ -73,7 +73,7 @@ La entrega fallida de EventBridge tiene DLQ/política configurada, pero su prueb
 de fallo inducido no se ejecuta por este paquete. Replay se documenta; no se
 lanza automáticamente. No afirmar que se envió SMS/email.
 
-Guardar en VERIFICACION-TAREA6.md resultados reales de pruebas, SAM, stack,
+Guardar en docs/historico/verificaciones/VERIFICACION-TAREA6.md resultados reales de pruebas, SAM, stack,
 IDs de notificación, mensaje DLQ y revisión del catálogo. Abrir PR con revisor.
 No subir .venv, .aws-sam, contraseñas, tokens ni cuerpos de invitación con contacto.
 

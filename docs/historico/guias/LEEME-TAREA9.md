@@ -40,10 +40,10 @@ El reconciliador escanea la tabla base de pasos en este entorno pequeño y reint
 
 ## Guardar cambios
 
-Actualizar VERIFICACION-TAREA9.md solo con salidas observadas. Tras revisión de Cynthia o Tono:
+Actualizar docs/historico/verificaciones/VERIFICACION-TAREA9.md solo con salidas observadas. Tras revisión de Cynthia o Tono:
 
 ```bash
-git add template.yaml statemachines/espera_recarga.asl.json src/common/money.py src/pasos/facturar.py src/flujos tests/integration/test_wait_topup.py tests/integration/test_wait_topup_aws.py docs/diseno-tarea9.md docs/eventos-v2.md requirements-task9.txt LEEME-TAREA9.md VERIFICACION-TAREA9.md
+git add template.yaml statemachines/espera_recarga.asl.json src/common/money.py src/pasos/facturar.py src/flujos tests/integration/test_wait_topup.py tests/integration/test_wait_topup_aws.py docs/diseno-tarea9.md docs/eventos-v2.md requirements-task9.txt LEEME-TAREA9.md docs/historico/verificaciones/VERIFICACION-TAREA9.md
 git diff --cached --check
 git commit -m "Implementar espera de recarga y factura por vencimiento"
 git push origin fabian/base

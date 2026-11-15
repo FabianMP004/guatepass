@@ -161,14 +161,14 @@ en futuros despliegues: el script lee el valor del stack, salvo el argumento dad
 
 ## Evidencia y commit
 
-Actualizar VERIFICACION-TAREA7.md con las salidas reales. No marcar los tests Moto,
+Actualizar docs/historico/verificaciones/VERIFICACION-TAREA7.md con las salidas reales. No marcar los tests Moto,
 AWS ni sam validate como aprobados sin ejecutarlos. La prueba local que conecta
 republicación Outbox con cobro único está en test_wallet.py; AWS comprueba concurrencia
 y duplicados de Lambda por separado. La caída real de publicadora fue comprobada
 en tarea 5, pero no se simuló nuevamente en AWS con el cobro conectado.
 
 ```bash
-git add template.yaml requirements-task7.txt src/common/dynamo.py src/common/money.py src/pasos/cobrar.py src/usuarios/tags.py tests/unit/test_tarifas.py tests/unit/test_infra_tarea7.py tests/integration/test_wallet.py tests/integration/test_wallet_aws.py tests/integration/test_auth.py scripts/completar_identidades_tarea7.py scripts/desplegar_tarea7.py docs/eventos-v2.md LEEME-TAREA7.md VERIFICACION-TAREA7.md
+git add template.yaml requirements-task7.txt src/common/dynamo.py src/common/money.py src/pasos/cobrar.py src/usuarios/tags.py tests/unit/test_tarifas.py tests/unit/test_infra_tarea7.py tests/integration/test_wallet.py tests/integration/test_wallet_aws.py tests/integration/test_auth.py scripts/completar_identidades_tarea7.py scripts/desplegar_tarea7.py docs/eventos-v2.md LEEME-TAREA7.md docs/historico/verificaciones/VERIFICACION-TAREA7.md
 ```
 
 Si se aplicaron asignaciones, añadir seeds/guatepass/integrantes.csv. Revisar

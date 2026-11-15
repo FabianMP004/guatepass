@@ -40,10 +40,10 @@ Límite por operación Q10,000.00; monto API es texto decimal con máximo dos de
 
 ## Entrega
 
-Tras registrar salidas reales en VERIFICACION-TAREA8.md:
+Tras registrar salidas reales en docs/historico/verificaciones/VERIFICACION-TAREA8.md:
 
 ```bash
-git add template.yaml src/common/money.py src/pasos/cobrar.py src/pasos/pendientes.py src/usuarios/recargar.py tests/integration/test_topup.py tests/integration/test_topup_aws.py docs/api.md docs/eventos-v2.md requirements-task8.txt LEEME-TAREA8.md VERIFICACION-TAREA8.md
+git add template.yaml src/common/money.py src/pasos/cobrar.py src/pasos/pendientes.py src/usuarios/recargar.py tests/integration/test_topup.py tests/integration/test_topup_aws.py docs/api.md docs/eventos-v2.md requirements-task8.txt LEEME-TAREA8.md docs/historico/verificaciones/VERIFICACION-TAREA8.md
 git diff --cached --check
 git commit -m "Implementar recargas idempotentes y drenaje FIFO de pendientes"
 git push origin fabian/base
